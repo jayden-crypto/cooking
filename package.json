@@ -1,0 +1,18 @@
+{
+  "name": "recipe-box",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Personal app for saving recipes from Instagram (and other) links",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node dev-server.js",
+    "test": "node --test",
+    "try": "node scripts/try-link.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.134.0"
+  }
+}
