@@ -37,6 +37,11 @@ const ICONS = {
   trash: '<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>',
   link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
   share: '<path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="m9 12.5 2 2 4-4.5"/>',
+  bowl: '<path d="M3 11.5h18a9 9 0 0 1-18 0Z"/><path d="M8.5 8c0-1.6 1.2-1.6 1.2-3.2M12.5 8c0-1.6 1.2-1.6 1.2-3.2"/>',
+  flame: '<path d="M12 21.5c3.9 0 6.8-2.6 6.8-6.5 0-3.3-2.3-5.8-4-7.6-.4 1.9-1.5 3.1-2.6 3.6.3-2.6-.6-5.5-2.9-7.5-.3 3.2-2 5.2-3.4 6.9C4.6 12 4.2 13.5 4.2 15c0 3.9 3.1 6.5 7.8 6.5Z"/>',
+  caption: '<path d="M20.5 11.6a8.4 8.4 0 0 1-12.2 7.5L3.5 20.5l1.4-4.6a8.4 8.4 0 1 1 15.6-4.3Z"/>',
+  arrow: '<path d="M4 12h16M14 6l6 6-6 6"/>',
 };
 
 function icon(name, { filled = false } = {}) {
@@ -72,6 +77,29 @@ const normalise = (s) =>
     .toLowerCase();
 
 const shorten = (text, max = 40) => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text);
+
+/** "1 hr 10 min" -> 70, "15–20 min" -> 20. Returns null when there's no time in the text. */
+function parseMinutes(text) {
+  if (!text) return null;
+  const t = String(text).toLowerCase();
+  const hours = t.match(/(\d+(?:[.,]\d+)?)\s*(?:h|hrs?|hours?)\b/);
+  const mins = t.match(/(\d+)\s*(?:m|mins?|minutes?)\b/);
+  if (!hours && !mins) return null;
+  return Math.round((hours ? parseFloat(hours[1].replace(',', '.')) * 60 : 0) + (mins ? Number(mins[1]) : 0)) || null;
+}
+
+/** Total time for a recipe: its stated total, or prep + cook. */
+function recipeMinutes(recipe = {}) {
+  const total = parseMinutes(recipe.totalTime);
+  if (total) return total;
+  const sum = (parseMinutes(recipe.prepTime) || 0) + (parseMinutes(recipe.cookTime) || 0);
+  return sum || null;
+}
+
+const shortTime = (minutes) =>
+  minutes < 60 ? `${minutes}m` : minutes % 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes / 60}h`;
+
+const readyAt = (minutes) => new Date(Date.now() + minutes * 60_000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
 const formatDate = (ts) => new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 
@@ -162,6 +190,7 @@ const state = {
   filter: 'all',
   password: storage.get('appPassword'),
   openId: null,
+  detailTab: 'recipe',
   cameFromList: false,
 };
 
@@ -361,31 +390,43 @@ function renderFilters() {
   );
 }
 
+function avatarEl(author = {}) {
+  if (author.avatar) return h('img', { class: 'avatar', src: author.avatar, alt: '' });
+  const letter = (author.username || author.name || '?').replace(/^@/, '').charAt(0).toUpperCase();
+  return h('span', { class: 'avatar', 'aria-hidden': 'true' }, letter);
+}
+
+const creatorName = (r) => (r.author?.username ? `@${r.author.username}` : r.author?.name || sourceName(r));
+
 function card(r) {
-  const who = r.author?.username ? `@${r.author.username}` : r.author?.name || sourceName(r);
-  const time = r.recipe?.totalTime || r.recipe?.cookTime;
-  const meta = r.pending ? 'Reading the post…' : r.error ? "Couldn't load · tap to retry" : [who, time].filter(Boolean).join(' · ');
+  const minutes = recipeMinutes(r.recipe);
+  const status = r.pending ? 'Reading the post…' : r.error ? "Couldn't load · tap to retry" : creatorName(r);
   return h(
     'a',
     { class: `card${r.pending ? ' pending' : ''}${r.error ? ' failed' : ''}`, href: `#/r/${r.id}` },
+    r.thumbnail ? h('img', { src: r.thumbnail, alt: '', decoding: 'async' }) : h('div', { class: 'placeholder' }, '🍲'),
+    minutes && !r.pending ? h('span', { class: 'time-badge' }, icon('clock'), shortTime(minutes)) : null,
+    r.favorite && h('span', { class: 'fav-badge', 'aria-label': 'Favorite' }, icon('heart')),
     h(
       'div',
-      { class: 'card-media' },
-      r.thumbnail ? h('img', { src: r.thumbnail, alt: '', decoding: 'async' }) : h('div', { class: 'placeholder' }, '🍲'),
-      r.mediaType === 'video' && h('span', { class: 'badge video' }, icon('play'), r.source === 'instagram' ? 'Reel' : 'Video'),
-      r.favorite && h('span', { class: 'badge fav', 'aria-label': 'Favorite' }, icon('heart', { filled: true })),
-      r.cookCount > 0 && h('span', { class: 'badge made' }, '✓ Made'),
+      { class: 'card-panel glass' },
+      h(
+        'div',
+        { class: 'card-creator' },
+        r.pending ? h('span', { class: 'spinner' }) : r.error ? null : avatarEl(r.author),
+        h('span', { class: 'name' }, status),
+        r.cookCount > 0 && !r.pending ? h('span', { class: 'made' }, r.cookCount > 1 ? `Made ${r.cookCount}×` : 'Made it') : null,
+      ),
+      h('h3', { class: 'card-title' }, r.title || 'Untitled'),
     ),
-    h('div', { class: 'card-body' }, h('h3', { class: 'card-title' }, r.title || 'Untitled'), h('p', { class: 'card-meta' }, meta)),
   );
 }
 
 function renderEmpty(empty) {
   if (!state.recipes.length) {
     empty.replaceChildren(
-      h('div', { class: 'empty-emoji' }, '🍳'),
-      h('h2', {}, 'Your recipe box is empty'),
-      h('p', {}, 'Save the recipes you find on Instagram so you actually cook them.'),
+      h('h2', {}, 'Save your first recipe'),
+      h('p', {}, 'Keep the recipes you find on Instagram in one place, so you actually cook them.'),
       h(
         'ol',
         { class: 'how-to' },
@@ -395,9 +436,11 @@ function renderEmpty(empty) {
       ),
     );
   } else {
-    empty.replaceChildren(h('div', { class: 'empty-emoji' }, '🔍'), h('h2', {}, 'Nothing matches'), h('p', {}, 'Try another word or clear the filter.'));
+    empty.replaceChildren(h('h2', {}, 'Nothing matches'), h('p', {}, 'Try another word or clear the filter.'));
   }
 }
+
+const LIST_TITLES = { all: 'Saved', fav: 'Favorites', totry: 'To try', made: 'Made it' };
 
 function renderList() {
   renderFilters();
@@ -406,8 +449,9 @@ function renderList() {
   const empty = $('#empty');
   empty.hidden = items.length > 0;
   if (!items.length) renderEmpty(empty);
-  const n = state.recipes.length;
-  $('#count').textContent = n ? `${n} saved recipe${n === 1 ? '' : 's'}` : 'Recipes from Instagram, saved for real';
+  $('#list-head').hidden = items.length === 0;
+  $('#list-title').textContent = state.query.trim() ? 'Results' : LIST_TITLES[state.filter] || `#${state.filter.slice(4)}`;
+  $('#count').textContent = `${items.length} recipe${items.length === 1 ? '' : 's'}`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -458,21 +502,13 @@ function goBack() {
 }
 
 function sourceCta(r) {
-  const label =
-    r.source === 'instagram'
-      ? r.mediaType === 'video'
-        ? 'Watch on Instagram'
-        : 'Open on Instagram'
-      : r.source === 'tiktok'
-        ? 'Watch on TikTok'
-        : r.source === 'youtube'
-          ? 'Watch on YouTube'
-          : 'Open website';
-  return label;
+  if (r.mediaType === 'video') return r.source === 'tiktok' ? 'Watch on TikTok' : r.source === 'youtube' ? 'Watch on YouTube' : 'Watch on Instagram';
+  return r.source === 'instagram' ? 'Open on Instagram' : 'Open website';
 }
 
-function factPill(label, value) {
-  return value ? h('span', { class: 'fact' }, h('span', { class: 'label' }, label), h('b', {}, value)) : null;
+function metaPill(iconName, label, value) {
+  if (!value) return null;
+  return h('span', { class: 'meta-pill' }, iconName && icon(iconName), label && h('span', {}, label), h('b', {}, value));
 }
 
 function toggleCheck(r, kind, key, button) {
@@ -597,6 +633,8 @@ function renderDetail(r, { keepScroll = false } = {}) {
   const scroll = keepScroll ? view.scrollTop : 0;
   const recipe = r.recipe || {};
   const author = r.author || {};
+  const tab = r.caption ? state.detailTab : 'recipe';
+  const ready = !r.pending && !r.error;
 
   const favBtn = h(
     'button',
@@ -608,46 +646,54 @@ function renderDetail(r, { keepScroll = false } = {}) {
     save(r);
   });
 
-  const hasSteps = (recipe.ingredients?.length || 0) + (recipe.steps?.length || 0) > 0;
-  const wakeBtn =
-    'wakeLock' in navigator && hasSteps
-      ? h('button', {
-          class: 'icon-btn',
-          id: 'wake-btn',
-          'aria-label': 'Keep screen on while cooking',
-          onclick: async () => {
-            await setWakeLock(!wakeLock);
-            if (wakeLock) toast('Screen stays on while this recipe is open');
-          },
-        }, icon('sun'))
-      : null;
-
   const bar = h(
     'div',
     { class: 'detail-bar' },
     h('button', { class: 'icon-btn', 'aria-label': 'Back', onclick: goBack }, icon('back')),
-    h('div', { class: 'actions' }, wakeBtn, favBtn, h('button', { class: 'icon-btn', 'aria-label': 'More', onclick: () => openMenu(r) }, icon('more'))),
+    h('div', { class: 'actions' }, favBtn, h('button', { class: 'icon-btn', 'aria-label': 'More', onclick: () => openMenu(r) }, icon('more'))),
   );
 
   const hero = h(
     'a',
-    { class: 'hero', href: r.url, target: '_blank', rel: 'noopener' },
+    { class: 'hero', href: r.url, target: '_blank', rel: 'noopener', 'aria-label': sourceCta(r) },
     r.thumbnail ? h('img', { src: r.thumbnail, alt: '' }) : h('div', { class: 'placeholder' }, '🍲'),
-    !r.pending && h('span', { class: 'hero-cta' }, icon(r.mediaType === 'video' ? 'play' : 'external'), sourceCta(r)),
+    r.mediaType === 'video' && !r.pending && h('span', { class: 'play glass' }, icon('play')),
   );
 
-  const initial = (author.username || author.name || '?').replace(/^@/, '')[0].toUpperCase();
   const creator =
     author.username || author.name
       ? h(
           author.url ? 'a' : 'div',
           { class: 'creator', href: author.url || null, target: author.url ? '_blank' : null, rel: 'noopener' },
-          author.avatar ? h('img', { src: author.avatar, alt: '' }) : h('span', { class: 'avatar-fallback' }, initial),
-          h('div', { class: 'who' }, h('strong', {}, author.username ? `@${author.username}` : author.name), h('span', {}, `on ${sourceName(r)}`)),
+          avatarEl(author),
+          h('span', { class: 'name' }, creatorName(r)),
+          h('span', { class: 'via' }, `on ${sourceName(r)}`),
+          author.url && icon('arrow'),
         )
       : null;
 
-  const madeBtn = h('button', { class: 'btn good' }, icon('check'), r.cookCount ? 'Made it again' : 'I made this');
+  const minutes = recipeMinutes(recipe);
+  const meta = h(
+    'div',
+    { class: 'meta' },
+    metaPill('clock', null, minutes && shortTime(minutes)),
+    metaPill(null, 'Ready', minutes && readyAt(minutes)),
+    metaPill('bowl', null, recipe.servings),
+    recipe.totalTime && metaPill(null, 'Prep', parseMinutes(recipe.prepTime) && shortTime(parseMinutes(recipe.prepTime))),
+    recipe.totalTime && metaPill(null, 'Cook', parseMinutes(recipe.cookTime) && shortTime(parseMinutes(recipe.cookTime))),
+  );
+
+  const tabPill = (id, iconName, label) =>
+    h('button', {
+      class: `pill${tab === id ? ' on' : ''}`,
+      'aria-pressed': String(tab === id),
+      onclick: () => {
+        state.detailTab = id;
+        renderDetail(r, { keepScroll: true });
+      },
+    }, icon(iconName), label);
+
+  const madeBtn = h('button', { class: 'pill' }, icon('check'), r.cookCount ? `Made ${r.cookCount}×` : 'I made this');
   madeBtn.addEventListener('click', () => {
     const previous = { cookCount: r.cookCount || 0, lastCookedAt: r.lastCookedAt };
     r.cookCount = previous.cookCount + 1;
@@ -661,6 +707,30 @@ function renderDetail(r, { keepScroll = false } = {}) {
       },
     });
   });
+
+  const hasSteps = (recipe.ingredients?.length || 0) + (recipe.steps?.length || 0) > 0;
+  const wakeBtn =
+    'wakeLock' in navigator && hasSteps
+      ? h('button', {
+          class: 'pill',
+          id: 'wake-btn',
+          onclick: async () => {
+            await setWakeLock(!wakeLock);
+            if (wakeLock) toast('Screen stays on while this recipe is open');
+          },
+        }, icon('sun'), 'Keep screen on')
+      : null;
+
+  const pills = h(
+    'div',
+    { class: 'pill-row' },
+    tabPill('recipe', 'flame', 'Recipe'),
+    r.caption && tabPill('caption', 'caption', 'Caption'),
+    h('span', { class: 'divider' }),
+    h('a', { class: 'pill', href: r.url, target: '_blank', rel: 'noopener' }, icon(r.mediaType === 'video' ? 'play' : 'external'), r.mediaType === 'video' ? 'Watch' : 'Open'),
+    ready && madeBtn,
+    wakeBtn,
+  );
 
   let notesTimer;
   const myNotes = h('textarea', {
@@ -676,52 +746,53 @@ function renderDetail(r, { keepScroll = false } = {}) {
     },
   });
 
+  const tags = recipe.tags?.length
+    ? h(
+        'div',
+        { class: 'tags' },
+        recipe.tags.map((t) =>
+          h('button', {
+            class: 'tag',
+            onclick: () => {
+              state.filter = `tag:${t}`;
+              state.query = '';
+              $('#search').value = '';
+              renderList();
+              goBack();
+            },
+          }, `#${t}`),
+        ),
+      )
+    : null;
+
+  const sourceLine = h('p', { class: 'source-line' }, `Saved ${formatDate(r.createdAt)} from ${sourceName(r)}${r.edited ? ' · edited by you' : ''}`);
+
+  const content =
+    tab === 'caption'
+      ? [h('p', { class: 'caption-text' }, r.caption), sourceLine]
+      : [
+          statusCallout(r),
+          ingredientsSection(r),
+          stepsSection(r),
+          recipe.notes ? h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', {}, 'Creator’s notes')), h('p', { class: 'creator-notes' }, recipe.notes)) : null,
+          h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', {}, 'My notes')), myNotes),
+          tags,
+          sourceLine,
+        ];
+
   const body = h(
     'div',
     { class: 'detail-body' },
-    h('h1', { class: 'detail-title' }, r.title || 'Untitled'),
     creator,
-    h(
-      'div',
-      { class: 'facts' },
-      factPill('Prep', recipe.prepTime),
-      factPill('Cook', recipe.cookTime),
-      factPill('Total', recipe.totalTime),
-      factPill('Serves', recipe.servings),
-    ),
-    recipe.tags?.length
-      ? h(
-          'div',
-          { class: 'tags' },
-          recipe.tags.map((t) =>
-            h('button', {
-              class: 'tag',
-              onclick: () => {
-                state.filter = `tag:${t}`;
-                state.query = '';
-                $('#search').value = '';
-                renderList();
-                goBack();
-              },
-            }, `#${t}`),
-          ),
-        )
-      : null,
-    !r.pending && !r.error
-      ? h('div', { class: 'made-row' }, madeBtn, r.cookCount ? h('span', { class: 'note' }, `Made ${r.cookCount}× · last ${formatDate(r.lastCookedAt)}`) : null)
-      : null,
+    h('h1', { class: 'detail-title' }, r.title || 'Untitled'),
+    meta.childElementCount ? meta : null,
     recipe.description ? h('p', { class: 'description' }, recipe.description) : null,
-    statusCallout(r),
-    ingredientsSection(r),
-    stepsSection(r),
-    recipe.notes ? h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', {}, 'Creator’s notes')), h('p', { class: 'creator-notes' }, recipe.notes)) : null,
-    h('section', { class: 'section' }, h('div', { class: 'section-head' }, h('h2', {}, 'My notes')), myNotes),
-    r.caption ? h('details', { class: 'caption' }, h('summary', {}, 'Original caption'), h('p', {}, r.caption)) : null,
-    h('p', { class: 'source-line' }, `Saved ${formatDate(r.createdAt)} from ${sourceName(r)}${r.edited ? ' · edited by you' : ''}`),
+    pills,
+    content,
   );
 
   view.replaceChildren(bar, hero, body);
-  view.onscroll = () => bar.classList.toggle('solid', view.scrollTop > hero.offsetHeight - 80);
+  view.onscroll = () => bar.classList.toggle('solid', view.scrollTop > hero.offsetHeight - 90);
   view.hidden = false;
   document.body.classList.add('no-scroll');
   view.scrollTop = scroll;
@@ -1085,6 +1156,7 @@ function route() {
   const record = id && byId(id);
   if (record) {
     state.cameFromList = state.cameFromList || state.openId === null;
+    if (state.openId !== id) state.detailTab = 'recipe';
     state.openId = id;
     closeSheet();
     renderDetail(record);

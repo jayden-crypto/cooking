@@ -3,13 +3,14 @@
 // background, so a new version shows up the next time the app is opened.
 // The /api/ routes are never cached.
 
-const CACHE = 'recipe-box-v1';
+const CACHE = 'recipe-box-v2';
 const SHELL = [
   '/',
   '/index.html',
   '/styles.css',
   '/app.js',
   '/db.js',
+  '/fonts/manrope.woff2',
   '/manifest.webmanifest',
   '/icons/icon.svg',
   '/icons/icon-192.png',
