@@ -149,3 +149,57 @@ test('page addresses round-trip and use only letters, digits and hyphens', async
     assert.equal(parseRoute(junk).page, 'home', junk);
   }
 });
+
+test('seat groups are side by side, never across an aisle, best first', async () => {
+  const { seatGroups, isTogether } = await import('../js/layout.js');
+  const L = layouts.studio; // blocks of 4, 10, 4
+  const pairs = seatGroups(L, 2);
+  assert.equal(pairs.length, L.rows.length * (3 + 9 + 3));
+  for (const g of pairs) assert.ok(isTogether(L, g.seats.map((s) => s.id)), g.seats.map((s) => s.id).join());
+  for (let i = 1; i < pairs.length; i++) assert.ok(pairs[i - 1].score >= pairs[i].score);
+  assert.equal(pairs[0].seats.length, 2);
+  assert.ok(pairs[0].seats.every((s) => s.block === 1), 'best pair is in the middle block');
+  // a block of 4 can't seat 5 together, so only the middle block offers fives
+  assert.ok(seatGroups(L, 5).every((g) => g.seats[0].block === 1));
+  assert.equal(seatGroups(L, 11).length, 0);
+});
+
+test('groups skip taken seats', async () => {
+  const { seatGroups } = await import('../js/layout.js');
+  const L = layouts.studio;
+  const taken = new Set(['F9', 'F10']);
+  const groups = seatGroups(L, 2, (s) => !taken.has(s.id));
+  assert.ok(groups.every((g) => g.seats.every((s) => !taken.has(s.id))));
+});
+
+test('groupAround keeps you in your seat, or finds the nearest group when you can’t', async () => {
+  const { groupAround } = await import('../js/layout.js');
+  const L = layouts.studio;
+  const seat = L.byId.get('F9');
+  const g = groupAround(L, seat, 2);
+  assert.equal(g.moved, false);
+  assert.ok(g.seats.includes(seat));
+  assert.equal(groupAround(L, seat, 1).seats[0], seat);
+
+  // both neighbours taken: the pair moves, but stays close
+  const taken = new Set(['F8', 'F10']);
+  const free = (s) => !taken.has(s.id);
+  const moved = groupAround(L, seat, 2, free);
+  assert.equal(moved.moved, true);
+  assert.ok(!moved.seats.includes(seat));
+  assert.ok(Math.abs(moved.seats[0].row - seat.row) <= 1, `moved to ${moved.seats.map((s) => s.id)}`);
+
+  // nothing free at all
+  assert.equal(groupAround(L, seat, 2, () => false), null);
+});
+
+test('isTogether spots gaps, aisles and mixed rows', async () => {
+  const { isTogether } = await import('../js/layout.js');
+  const L = layouts.studio;
+  assert.equal(isTogether(L, ['F9', 'F10']), true);
+  assert.equal(isTogether(L, ['F10', 'F9', 'F11']), true);
+  assert.equal(isTogether(L, ['F9', 'F11']), false, 'gap');
+  assert.equal(isTogether(L, ['F4', 'F5']), false, 'aisle between blocks');
+  assert.equal(isTogether(L, ['F9', 'G10']), false, 'different rows');
+  assert.equal(isTogether(L, ['F9', 'Z99']), false);
+});

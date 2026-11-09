@@ -5,6 +5,18 @@ import * as THREE from '../vendor/three.module.min.js';
 import { drawScene } from './films.js';
 
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
+const LOOK_OUT_THE_BACK = new THREE.Quaternion(-Math.SQRT1_2, 0, 0, Math.SQRT1_2); // -90° about x
+
+/** Phone orientation as a camera rotation (the screen faces you, the camera looks out the back). */
+function deviceQuaternion(e) {
+  const d = THREE.MathUtils.DEG2RAD;
+  const screenAngle = (screen.orientation?.angle ?? window.orientation ?? 0) * d;
+  const q = new THREE.Quaternion().setFromEuler(new THREE.Euler((e.beta || 0) * d, (e.alpha || 0) * d, -(e.gamma || 0) * d, 'YXZ'));
+  q.multiply(LOOK_OUT_THE_BACK);
+  q.multiply(new THREE.Quaternion().setFromAxisAngle(Z_AXIS, -screenAngle));
+  return q;
+}
 const FILM_W = 1024;
 const FILM_H = 428;
 const reduceMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -618,7 +630,13 @@ export class Theater {
       if (t >= 1) this.flight = null;
     }
     const L = this.look;
-    if (!L.dragging) {
+    const tilt = this.tiltAngles();
+    if (!L.dragging && tilt) {
+      // follow the phone, smoothed a little to take out sensor jitter
+      L.yaw += (tilt.yaw - L.yaw) * 0.35;
+      L.pitch += (tilt.pitch - L.pitch) * 0.35;
+      L.vyaw = L.vpitch = 0;
+    } else if (!L.dragging) {
       // spring back to looking at the middle of the screen
       const dt = 1 / 60;
       for (const [p, v] of [
@@ -679,7 +697,9 @@ export class Theater {
       this.onLook?.();
       const now = performance.now();
       if (now - lastTap < 300) {
+        // double tap: look straight at the screen again (and re-centre the tilt)
         this.look.yaw = this.look.pitch = 0;
+        this.recenterTilt();
       }
       lastTap = now;
     });
@@ -699,6 +719,43 @@ export class Theater {
     };
     c.addEventListener('pointerup', end);
     c.addEventListener('pointercancel', end);
+  }
+
+  /* ---------- tilt the phone to look around ---------- */
+
+  /** Turn tilt on or off. The way the phone is held when it starts counts as straight ahead. */
+  setTilt(on) {
+    if (!!on === !!this.tiltOn) return;
+    this.tiltOn = !!on;
+    this.tiltBase = null;
+    this.tiltNow = null;
+    this.lastOrientation = 0;
+    if (on) {
+      this.onOrientation = (e) => {
+        if (e.alpha == null && e.beta == null && e.gamma == null) return;
+        this.tiltNow = deviceQuaternion(e);
+        if (!this.tiltBase) this.tiltBase = this.tiltNow.clone();
+        this.lastOrientation = performance.now();
+      };
+      window.addEventListener('deviceorientation', this.onOrientation);
+    } else {
+      window.removeEventListener('deviceorientation', this.onOrientation);
+    }
+  }
+
+  recenterTilt() {
+    if (this.tiltNow) this.tiltBase = this.tiltNow.clone();
+  }
+
+  /** How far the phone has turned since tilt started, as head yaw and pitch (radians). */
+  tiltAngles() {
+    if (!this.tiltOn || !this.tiltNow || !this.tiltBase) return null;
+    const rel = this.tiltBase.clone().invert().multiply(this.tiltNow);
+    const d = new THREE.Vector3(0, 0, -1).applyQuaternion(rel);
+    return {
+      yaw: clamp(Math.atan2(-d.x, -d.z), -1.4, 1.4),
+      pitch: clamp(Math.asin(clamp(d.y, -1, 1)), -0.6, 0.8),
+    };
   }
 
   /* ---------- film and lights ---------- */

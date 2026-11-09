@@ -228,3 +228,61 @@ export function bestSeat(layout, isFree = () => true) {
   }
   return best;
 }
+
+/* ---------- seats together ---------- */
+
+function rowRuns(row, size, isFree) {
+  const runs = [];
+  for (let i = 0; i + size <= row.seats.length; i++) {
+    const seats = row.seats.slice(i, i + size);
+    if (seats.some((s) => s.block !== seats[0].block || !isFree(s))) continue; // no aisle in the middle
+    const scores = seats.map((s) => s.metrics.score);
+    const mean = scores.reduce((a, b) => a + b, 0) / size;
+    runs.push({
+      seats,
+      // a group is only as happy as its worst seat, so that counts too
+      score: Math.round(0.6 * mean + 0.4 * Math.min(...scores)),
+      centre: seats.reduce((a, s) => a + s.x, 0) / size,
+      row: row.index,
+    });
+  }
+  return runs;
+}
+
+/** Every run of `size` free seats side by side (same row, same block), best first. */
+export function seatGroups(layout, size, isFree = () => true) {
+  return layout.rows
+    .flatMap((row) => rowRuns(row, size, isFree))
+    .sort((a, b) => b.score - a.score || Math.abs(a.centre) - Math.abs(b.centre));
+}
+
+/** The best group of `size` that includes `seat`. If its neighbours are taken, the group
+ *  nearest to it (`moved: true`). Null when no `size` free seats sit together anywhere. */
+export function groupAround(layout, seat, size, isFree = () => true) {
+  if (size <= 1) return isFree(seat) ? { seats: [seat], score: seat.metrics.score, moved: false } : null;
+  const own = rowRuns(layout.rows[seat.row], size, isFree)
+    .filter((g) => g.seats.includes(seat))
+    .sort((a, b) => b.score - a.score || Math.abs(a.centre - seat.x) - Math.abs(b.centre - seat.x));
+  if (own.length) return { ...own[0], moved: false };
+  const pitch = layout.aud.rowPitch;
+  let best = null;
+  let bestD = Infinity;
+  for (const g of seatGroups(layout, size, isFree)) {
+    const d = Math.hypot((g.row - seat.row) * pitch, g.centre - seat.x);
+    if (d < bestD - 1e-9) {
+      best = g;
+      bestD = d;
+    }
+  }
+  return best ? { ...best, moved: true } : null;
+}
+
+/** True when the seats are side by side in one row with no aisle or gap between them. */
+export function isTogether(layout, ids) {
+  const seats = ids.map((id) => layout.byId.get(id)).filter(Boolean);
+  if (seats.length !== ids.length || !seats.length) return false;
+  const { row, block } = seats[0];
+  if (seats.some((s) => s.row !== row || s.block !== block)) return false;
+  const nums = seats.map((s) => s.number).sort((a, b) => a - b);
+  return nums.every((n, i) => i === 0 || n === nums[i - 1] + 1);
+}

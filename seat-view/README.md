@@ -10,9 +10,13 @@ Pick a showtime and you're dropped into a 3D model of that screen, looking from 
 
 Tap **Compare views** to see the view from the left, centre and right of every row side by side, rendered live from each seat (sold ones too, dimmed). Tap any of them to sit there.
 
+Going with friends? Set how many of you there are with **− 2 +** next to the book button. Wherever you look from, the app keeps your group side by side around that seat (never across an aisle) and shows them on the map. If the seats next to you are taken it says so and offers the nearest group that fits. **Best 2 together** jumps to the best pair in the room, and tapping it again steps through the next best.
+
+On a phone, tap the phone icon at the top to **look around by moving your phone**. Double-tap the view to re-centre. Tilt needs the app opened on its own site over https; browsers block motion sensors inside embedded previews.
+
 Swipe the card up for the seat map. Tap a seat to jump there, or drag your finger across the map and the 3D view follows you around the room. Drag the 3D view itself to look around. **Best available** takes you to the best free seat, and **Colour seats by view quality** turns the map into a heat map.
 
-Booking for a group: tap **Add** on each seat, then **Continue**. The ticket keeps a picture of your view.
+The ticket keeps a picture of your view.
 
 > This is a design prototype. The cinema, films, prices and audience are made up, no payment is taken, and bookings are only saved in your browser.
 

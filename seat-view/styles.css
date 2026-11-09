@@ -522,11 +522,18 @@ svg {
 .seats-top {
   position: absolute;
   inset: 0 0 auto;
-  display: flex;
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) 96px; /* equal sides keep the title centred */
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   padding: calc(var(--safe-top) + 10px) 14px 0;
   pointer-events: none;
+}
+
+.seats-tools {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .seats-top > * {
@@ -552,6 +559,9 @@ svg {
 
 .seats-title span {
   display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   color: var(--soft);
   font-size: 12.5px;
   text-shadow: 0 1px 12px rgb(0 0 0 / 60%);
@@ -850,6 +860,7 @@ svg {
 
 .sheet:not(.open) .sheet-body {
   overflow: hidden;
+  overflow: clip;
 }
 
 .seat-head {
@@ -1235,18 +1246,107 @@ svg {
 }
 
 .sel-summary {
-  min-height: 18px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin: 0 4px 8px;
-  overflow: hidden;
   color: var(--muted);
   font-size: 13px;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  line-height: 1.35;
+}
+
+.sel-summary:empty {
+  display: none;
+}
+
+.sel-summary > span {
+  min-width: 0;
+}
+
+.sel-summary svg {
+  width: 15px;
+  height: 15px;
+  color: var(--mint);
+}
+
+.sel-summary.moved svg {
+  color: var(--amber);
 }
 
 .sel-summary b {
   color: var(--text);
   font-weight: 600;
+}
+
+.link-inline {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 4px 0 4px 6px;
+  border: 0;
+  background: none;
+  color: var(--mint);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* how many seats: − 2 + */
+
+.party {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  height: 52px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--card-2);
+}
+
+.party-btn {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--text);
+}
+
+.party-btn:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+
+.party-btn svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2.2;
+}
+
+.party-count {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 34px;
+  justify-content: center;
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.party-count svg {
+  width: 15px;
+  height: 15px;
+  color: var(--muted);
+}
+
+.glass-btn[aria-pressed='true'].tilt-on,
+#tilt-btn[aria-pressed='true'] {
+  background: var(--mint);
+  border-color: transparent;
+  color: #06210f;
 }
 
 .action-row {
@@ -1259,9 +1359,7 @@ svg {
   padding: 0 16px;
 }
 
-.action-row #toggle-seat {
-  flex: 0 0 auto;
-}
+
 
 /* ---------- checkout and ticket pages ---------- */
 

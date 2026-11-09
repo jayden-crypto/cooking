@@ -15,7 +15,7 @@ import {
   formatRuntime,
   dayKey,
 } from './data.js';
-import { buildLayout, bestSeat, describeView, formatOffset, formatClearance } from './layout.js';
+import { buildLayout, bestSeat, describeView, formatOffset, formatClearance, seatGroups, groupAround } from './layout.js';
 import { drawPoster } from './films.js';
 import { SeatMap } from './seatmap.js';
 import { routes, parseRoute } from './routes.js';
@@ -57,8 +57,9 @@ const state = {
   taken: new Set(),
   mine: new Set(),
   focus: null,
-  selected: [],
+  bestCycle: null,
   prefs: store.prefs(),
+  party: Math.max(1, Math.min(8, Number(store.prefs().party) || 1)),
   snapshot: null,
   justBooked: null,
 };
@@ -70,6 +71,10 @@ function showView(id) {
   document.body.classList.toggle('locked', id === 'seats');
   if (id !== 'seats') {
     closeViews({ restoreFocus: false });
+    if (theater?.tiltOn) {
+      theater.setTilt(false);
+      setTiltUi(false);
+    }
     theater?.stop();
   }
 }
@@ -361,6 +366,10 @@ function bindSheetDrag(handle) {
 bindSheetDrag($('#grip'));
 bindSheetDrag($('#seat-head'));
 $('#grip').addEventListener('click', () => sheet.toggle(!sheet.open));
+// tabbing into the seat map while the card is down brings it up, so focus is never hidden
+$('#map-block').addEventListener('focusin', () => {
+  if (!sheet.open && !desktop.matches) sheet.toggle(true);
+});
 $('#mini-map').addEventListener('click', () => sheet.toggle(true));
 window.addEventListener('resize', () => {
   if (!views.seats.hidden) sheet.measure({ ref: true });
@@ -379,6 +388,9 @@ const bigMap = new SeatMap($('#map-svg'), {
 const miniMap = new SeatMap($('#mini-svg'), { mini: true });
 
 const isFree = (id) => !state.taken.has(id) || state.mine.has(id);
+// seats you can still buy (your own bookings you can look from, but not buy again)
+const isBuyable = (seat) => !state.taken.has(seat.id);
+const middleOf = (group) => group.seats[Math.floor((group.seats.length - 1) / 2)];
 
 async function openShow(showId, focusId) {
   const show = findShow(showId);
@@ -391,19 +403,20 @@ async function openShow(showId, focusId) {
   state.taken = taken;
   state.mine = store.mySeats(show.id);
   if (changed) {
-    state.selected = [];
     state.focus = null;
+    state.bestCycle = null;
   }
-  state.selected = state.selected.filter((id) => isFree(id) && !state.mine.has(id));
   const requested = focusId && layout.byId.get(focusId);
   if (requested && isFree(requested.id)) state.focus = requested.id;
   if (!state.focus || !isFree(state.focus)) {
-    state.focus = (bestSeat(layout, (s) => !state.taken.has(s.id)) || layout.seats[0]).id;
+    // start where the best group for your party would sit
+    const best = seatGroups(layout, state.party, isBuyable)[0];
+    state.focus = (best ? middleOf(best) : bestSeat(layout, isBuyable) || layout.seats[0]).id;
   }
 
   showView('seats');
   $('#seats-film').textContent = show.film.title;
-  $('#seats-when').textContent = `${dayLabel(show.day)} · ${show.time} · ${show.aud.name} ${show.aud.format}`;
+  $('#seats-when').textContent = `${dayLabel(show.day)} ${show.time} · ${show.aud.name} ${show.aud.format}`;
   $('#lg-premium').hidden = !layout.seats.some((s) => s.premium) || show.aud.style === 'recliner';
   $('#people-btn').setAttribute('aria-pressed', String(state.prefs.people));
   $('#heat-toggle').checked = state.prefs.heat;
@@ -444,6 +457,7 @@ function setFocus(seat, { scrub = false } = {}) {
   if (!seat || state.focus === seat.id) return;
   if (!isFree(seat.id)) return;
   state.focus = seat.id;
+  state.bestCycle = null;
   theater?.focusSeat(seat, { quick: scrub });
   updateSeatInfo();
   updateMaps();
@@ -455,25 +469,36 @@ function pickSeat(seat) {
     toast(`${seatName(seat)} is taken`);
     return;
   }
-  if (state.focus === seat.id && !state.mine.has(seat.id)) toggleSelected(seat.id);
-  else setFocus(seat);
+  setFocus(seat);
 }
 
-function toggleSelected(id) {
-  if (state.mine.has(id)) return;
-  const i = state.selected.indexOf(id);
-  if (i >= 0) state.selected.splice(i, 1);
-  else if (state.selected.length >= MAX_SEATS) return toast(`Up to ${MAX_SEATS} seats per booking`);
-  else state.selected.push(id);
+/* ---------- seats together: the group you'd book, kept around the seat you look from ---------- */
+
+function currentGroup() {
+  const focus = state.layout.byId.get(state.focus);
+  if (!focus || state.mine.has(focus.id)) return null;
+  return groupAround(state.layout, focus, state.party, isBuyable);
+}
+
+function setParty(n) {
+  const next = Math.max(1, Math.min(MAX_SEATS, n));
+  if (next === state.party) return;
+  state.party = next;
+  state.bestCycle = null;
+  store.setPref('party', next);
   updateMaps();
   updateActions();
 }
 
+$('#party-minus').addEventListener('click', () => setParty(state.party - 1));
+$('#party-plus').addEventListener('click', () => setParty(state.party + 1));
+
 function updateMaps() {
+  const group = currentGroup();
   const s = {
     taken: state.taken,
     mine: state.mine,
-    selected: new Set(state.selected),
+    selected: new Set(group ? group.seats.map((x) => x.id) : []),
     focus: state.focus,
     heat: state.prefs.heat,
   };
@@ -532,40 +557,57 @@ function tween(from, to, paint) {
   step(start);
 }
 
+const range = (seats) => (seats.length > 2 ? `${seats[0].id}–${seats.at(-1).id}` : seats.map((s) => s.id).join(' & '));
+
 function updateActions() {
-  const layout = state.layout;
   const aud = state.show.aud;
-  const seats = state.selected.map((id) => layout.byId.get(id));
-  const total = seats.reduce((sum, s) => sum + priceOf(s, aud), 0);
-  const focus = layout.byId.get(state.focus);
-  const toggle = $('#toggle-seat');
+  const focus = state.layout.byId.get(state.focus);
   const primary = $('#continue-btn');
   const summary = $('#sel-summary');
-  const free = layout.seats.filter((s) => !state.taken.has(s.id)).length;
+  const n = state.party;
+  $('#party-count').textContent = String(n);
+  $('#party-minus').disabled = n <= 1;
+  $('#party-plus').disabled = n >= MAX_SEATS;
+  $('#party').setAttribute('aria-label', `${n} ${n > 1 ? 'seats' : 'seat'}`);
+  $('#best-btn-label').textContent =
+    state.bestCycle?.party === n ? 'Next best' : n > 1 ? `Best ${n} together` : 'Best available';
+  primary.disabled = false;
 
   if (state.mine.has(focus.id)) {
-    toggle.hidden = true;
+    $('#party').hidden = true;
     primary.textContent = 'See your ticket';
     primary.dataset.action = 'ticket';
     summary.innerHTML = `You’ve booked <b>${esc(focus.id)}</b> for this showing`;
-    return;
-  }
-  toggle.hidden = false;
-  const focusSelected = state.selected.includes(focus.id);
-  toggle.innerHTML = focusSelected ? `${ICON.minus}Remove` : `${ICON.plus}Add`;
-  toggle.setAttribute('aria-label', focusSelected ? `Remove ${seatName(focus)}` : `Add ${seatName(focus)} and keep choosing`);
-  if (!seats.length) {
-    primary.textContent = `Book this seat · ${money(priceOf(focus, aud))}`;
-    primary.dataset.action = 'book-focus';
-    summary.innerHTML = `${free} of ${layout.seats.length} seats free · tap <b>Add</b> to book for a group`;
   } else {
-    primary.textContent = `Continue · ${seats.length} ${seats.length > 1 ? 'seats' : 'seat'} · ${money(total)}`;
-    primary.dataset.action = 'continue';
-    summary.innerHTML = `Your ${seats.length > 1 ? 'seats' : 'seat'}: <b>${esc(seats.map((s) => s.id).join(', '))}</b>`;
+    $('#party').hidden = false;
+    const group = currentGroup();
+    primary.dataset.action = 'book';
+    if (!group) {
+      primary.disabled = true;
+      primary.textContent = n > 1 ? `No ${n} seats together left` : 'Sold out';
+      summary.innerHTML = n > 1 ? 'Try fewer seats, or another showing.' : '';
+    } else {
+      const total = group.seats.reduce((sum, x) => sum + priceOf(x, aud), 0);
+      primary.textContent = n > 1 ? `Book ${n} together · ${money(total)}` : `Book this seat · ${money(total)}`;
+      if (n === 1) summary.innerHTML = '';
+      else if (group.moved) {
+        summary.innerHTML = `${ICON.warn}<span>No ${n} free together at ${esc(focus.id)}. Nearest: <b>${esc(range(group.seats))}</b></span>
+          <button class="link-inline" id="go-group">Look from there</button>`;
+      } else {
+        summary.innerHTML = `${ICON.check}<span>Together: <b>${esc(range(group.seats))}</b></span>`;
+      }
+      summary.classList.toggle('moved', !!group.moved);
+    }
   }
+  if (!views.seats.hidden) requestAnimationFrame(() => sheet.measure({ animate: true }));
 }
 
-$('#toggle-seat').addEventListener('click', () => toggleSelected(state.focus));
+$('#sel-summary').addEventListener('click', (e) => {
+  if (!e.target.closest('#go-group')) return;
+  const group = currentGroup();
+  if (group) setFocus(middleOf(group));
+});
+
 $('#continue-btn').addEventListener('click', (e) => {
   const action = e.currentTarget.dataset.action;
   if (action === 'ticket') {
@@ -573,17 +615,18 @@ $('#continue-btn').addEventListener('click', (e) => {
     if (b) go(routes.ticket(b.id));
     return;
   }
-  if (action === 'book-focus') state.selected = [state.focus];
-  if (!state.selected.length) return;
-  // keep a picture of the view from the seat you're looking from (or your first seat)
-  if (theater && !state.selected.includes(state.focus)) {
-    const first = state.layout.byId.get(state.selected[0]);
-    theater.focusSeat(first, { instant: true });
-    state.focus = first.id;
+  const group = currentGroup();
+  if (!group) return;
+  const ids = group.seats.map((s) => s.id);
+  // the ticket keeps a picture of the view from one of the seats you're buying
+  if (theater && !ids.includes(state.focus)) {
+    const seat = middleOf(group);
+    theater.focusSeat(seat, { instant: true });
+    state.focus = seat.id;
   }
   state.snapshot = theater ? safe(() => theater.snapshot()) : null;
   state.snapshotSeat = state.focus;
-  go(routes.checkout(state.show.id, state.selected));
+  go(routes.checkout(state.show.id, ids));
 });
 
 function safe(fn) {
@@ -595,15 +638,76 @@ function safe(fn) {
 }
 
 $('#seats-back').addEventListener('click', () => go(routes.home()));
+// best group for your party; tap again for the next best
 $('#best-btn').addEventListener('click', () => {
-  const best = bestSeat(state.layout, (s) => !state.taken.has(s.id) && s.id !== state.focus && !state.selected.includes(s.id));
-  const current = state.layout.byId.get(state.focus);
-  if (best && (!current || best.metrics.score > current.metrics.score || state.selected.includes(current.id))) {
-    setFocus(best);
-  } else if (best) {
-    toast('You’re already looking from one of the best free seats');
+  const n = state.party;
+  const groups = seatGroups(state.layout, n, isBuyable);
+  if (!groups.length) {
+    toast(n > 1 ? `No ${n} seats together left for this showing` : 'This showing is sold out');
+    return;
   }
+  const index = state.bestCycle?.party === n ? (state.bestCycle.index + 1) % groups.length : 0;
+  const g = groups[index];
+  setFocus(middleOf(g));
+  state.bestCycle = { party: n, index };
+  const what = n > 1 ? `${n} together: ${range(g.seats)}` : `free seat: ${g.seats[0].id}`;
+  toast(index === 0 ? `Best ${what}` : `Option ${index + 1} of ${groups.length}: ${range(g.seats)}`);
+  updateMaps();
+  updateActions();
 });
+// tilt the phone to look around: offered on touch devices that have a motion sensor API
+const tiltBtn = $('#tilt-btn');
+tiltBtn.hidden = !('DeviceOrientationEvent' in window && window.matchMedia('(pointer: coarse)').matches);
+let tiltCheck;
+// inside another page (like a preview frame) the browser blocks motion sensors entirely
+const embedded = (() => {
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true;
+  }
+})();
+const TILT_BLOCKED_HERE = 'Tilt is blocked inside this preview. Open the app on its own site to use it.';
+function setTiltUi(on) {
+  tiltBtn.setAttribute('aria-pressed', String(on));
+  tiltBtn.setAttribute('aria-label', on ? 'Stop looking around with your phone' : 'Look around by moving your phone');
+}
+tiltBtn.addEventListener('click', async () => {
+  if (theater?.tiltOn) {
+    theater.setTilt(false);
+    setTiltUi(false);
+    toast('Tilt off. Drag to look around');
+    return;
+  }
+  // iPhone asks first, and only straight from a tap, so this comes before anything else
+  const ask = window.DeviceOrientationEvent?.requestPermission;
+  if (typeof ask === 'function') {
+    let answer = 'denied';
+    try {
+      answer = await ask.call(window.DeviceOrientationEvent);
+    } catch {
+      answer = 'denied';
+    }
+    if (answer !== 'granted') {
+      toast(embedded ? TILT_BLOCKED_HERE : 'Motion access is off. If you tapped Don’t Allow, reload the page and allow it.');
+      return;
+    }
+  }
+  const t = await getTheater();
+  if (!t) return;
+  t.setTilt(true);
+  setTiltUi(true);
+  toast('Move your phone to look around. Double-tap to re-centre.');
+  clearTimeout(tiltCheck);
+  tiltCheck = setTimeout(() => {
+    if (t.tiltOn && !t.lastOrientation) {
+      t.setTilt(false);
+      setTiltUi(false);
+      toast(embedded ? TILT_BLOCKED_HERE : 'This device isn’t sending motion data, so drag to look around instead');
+    }
+  }, 1500);
+});
+
 $('#people-btn').addEventListener('click', (e) => {
   state.prefs.people = !state.prefs.people;
   store.setPref('people', state.prefs.people);
@@ -617,7 +721,7 @@ $('#heat-toggle').addEventListener('change', (e) => {
   updateMaps();
 });
 
-// keyboard on the seat map: arrows move, Enter/Space adds or removes
+// keyboard on the seat map: arrows move between free seats
 $('#seat-map').addEventListener('keydown', (e) => {
   const layout = state.layout;
   const seat = layout.byId.get(state.focus);
@@ -634,10 +738,6 @@ $('#seat-map').addEventListener('keydown', (e) => {
       const options = layout.rows[r].seats.filter((s) => isFree(s.id));
       next = options.sort((a, b) => Math.abs(a.arc - seat.arc) - Math.abs(b.arc - seat.arc))[0] || null;
     }
-  } else if (e.key === 'Enter' || e.key === ' ') {
-    e.preventDefault();
-    toggleSelected(seat.id);
-    return;
   } else {
     return;
   }
@@ -830,7 +930,6 @@ function renderCheckout(showId, ids) {
       viewSeat: snap ? viewSeat.id : seats[0].id,
     };
     if (!store.addBooking(entry)) toast('Couldn’t save the ticket in this browser, but here it is');
-    state.selected = [];
     state.justBooked = entry;
     go(routes.ticket(entry.id), { replace: true });
   });
