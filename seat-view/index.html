@@ -48,6 +48,10 @@
         <svg viewBox="0 0 24 24"><path d="M7 12h10M4 12l3-3v6zM20 12l-3-3v6z" /></svg>
         Drag to look around
       </p>
+      <button class="views-pill" id="views-btn" aria-haspopup="dialog" aria-controls="views">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="7.5" height="6" rx="1.6" /><rect x="13" y="5" width="7.5" height="6" rx="1.6" /><rect x="3.5" y="13" width="7.5" height="6" rx="1.6" /><rect x="13" y="13" width="7.5" height="6" rx="1.6" /></svg>
+        Compare views
+      </button>
 
       <section class="sheet" id="sheet" aria-label="Seat details">
         <button class="grip" id="grip" aria-expanded="false" aria-controls="map-block"><span></span><b class="sr-only">Show seat map</b></button>
@@ -106,6 +110,22 @@
           <button class="btn primary" id="continue-btn"></button>
         </div>
       </footer>
+
+      <!-- Every row at once: the view from its left, centre and right -->
+      <section class="views" id="views" role="dialog" aria-modal="true" aria-labelledby="views-title" hidden>
+        <div class="views-inner">
+          <header class="views-top">
+            <button class="glass-btn" id="views-close" aria-label="Close and go back to your seat">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+            </button>
+            <div>
+              <h2 id="views-title">Compare views</h2>
+              <p>Left, centre and right of every row. Tap one to sit there.</p>
+            </div>
+          </header>
+          <div id="views-grid"></div>
+        </div>
+      </section>
     </section>
 
     <!-- Review and confirm -->

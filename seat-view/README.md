@@ -8,6 +8,8 @@ Pick a showtime and you're dropped into a 3D model of that screen, looking from 
 - A verdict: *Sweet spot*, *Great view*, *Up close*, *Side view* or *Relaxed view*
 - Whether you'll see over the heads in front (the sightline "C-value" cinema designers use) and whether you'll be craning your neck
 
+Tap **Compare views** to see the view from the left, centre and right of every row side by side, rendered live from each seat (sold ones too, dimmed). Tap any of them to sit there.
+
 Swipe the card up for the seat map. Tap a seat to jump there, or drag your finger across the map and the 3D view follows you around the room. Drag the 3D view itself to look around. **Best available** takes you to the best free seat, and **Colour seats by view quality** turns the map into a heat map.
 
 Booking for a group: tap **Add** on each seat, then **Continue**. The ticket keeps a picture of your view.

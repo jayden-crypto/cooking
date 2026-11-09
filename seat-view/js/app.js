@@ -68,7 +68,10 @@ const views = ['home', 'seats', 'checkout', 'ticket'].reduce((o, id) => ({ ...o,
 function showView(id) {
   for (const [name, el] of Object.entries(views)) el.hidden = name !== id;
   document.body.classList.toggle('locked', id === 'seats');
-  if (id !== 'seats') theater?.stop();
+  if (id !== 'seats') {
+    closeViews({ restoreFocus: false });
+    theater?.stop();
+  }
 }
 
 function go(hash, { replace = false } = {}) {
@@ -381,6 +384,7 @@ async function openShow(showId, focusId) {
   const show = findShow(showId);
   if (!show) return go(routes.home(), { replace: true });
   const changed = state.show?.id !== show.id;
+  closeViews({ restoreFocus: false });
   const { layout, taken } = occupancy(show);
   state.show = show;
   state.layout = layout;
@@ -639,6 +643,139 @@ $('#seat-map').addEventListener('keydown', (e) => {
   }
   e.preventDefault();
   if (next) setFocus(next);
+});
+
+/* ---------- compare views: the view from the left, centre and right of every row ---------- */
+
+const POSITIONS = ['Left', 'Centre', 'Right'];
+
+/** Three seats per row: the middle of each side block and the centre of the middle block,
+ *  moved to the nearest free seat where there is one. If you're sitting in this row, your
+ *  seat stands in for its block. */
+function sampleRow(row) {
+  const blocks = [...new Set(row.seats.map((s) => s.block))];
+  const byDistance = (list, arc) => [...list].sort((a, b) => Math.abs(a.arc - arc) - Math.abs(b.arc - arc));
+  const nearest = (list, arc) => {
+    const sorted = byDistance(list, arc);
+    return sorted.find((s) => isFree(s.id)) || sorted[0] || null;
+  };
+  let picks;
+  if (blocks.length === 3) {
+    picks = blocks.map((b, i) => {
+      const list = row.seats.filter((s) => s.block === b);
+      return nearest(list, i === 1 ? 0 : list[Math.floor(list.length / 2)].arc);
+    });
+  } else {
+    const first = row.seats[0].arc;
+    const span = row.seats.at(-1).arc - first;
+    picks = [0.12, 0.5, 0.88].map((t) => nearest(row.seats, first + span * t));
+    picks = picks.map((s, i) => (picks.indexOf(s) === i ? s : null));
+  }
+  const focus = state.layout.byId.get(state.focus);
+  if (focus?.row === row.index) {
+    const i = picks.findIndex((s) => s && s.block === focus.block);
+    if (i >= 0) picks[i] = focus;
+  }
+  return picks;
+}
+
+function viewCard(seat, position) {
+  if (!seat) return `<div class="view-card empty"><span>No seat here</span></div>`;
+  const m = seat.metrics;
+  const mine = state.mine.has(seat.id);
+  const sold = !isFree(seat.id);
+  const label = mine ? 'Yours' : sold ? 'Taken' : m.label;
+  const tone = mine ? 'great' : sold ? 'sold' : m.tone;
+  return `<button class="view-card${seat.id === state.focus ? ' current' : ''}${sold ? ' sold' : ''}" data-seat="${seat.id}"
+      aria-label="${position}: ${esc(seatName(seat))}, ${esc(label)}${sold ? '' : `, ${Math.round(m.fov)}° field of view`}">
+      <canvas data-seat="${seat.id}" aria-hidden="true"></canvas>
+      <span class="vc-cap"><b>${seat.id}</b><i class="${tone}">${esc(label)}</i></span>
+    </button>`;
+}
+
+async function openViews() {
+  const layout = state.layout;
+  const panel = $('#views');
+  const grid = $('#views-grid');
+  grid.innerHTML = layout.rows
+    .map((row) => {
+      const mid = row.seats[Math.floor(row.seats.length / 2)].metrics;
+      return `<section class="views-row" aria-label="Row ${row.label}">
+        <div class="views-row-head"><b>Row ${row.label}</b><span>${mid.distance.toFixed(1)} m to screen · ${Math.round(mid.fov)}°</span></div>
+        <div class="views-cards">${sampleRow(row)
+          .map((s, i) => viewCard(s, POSITIONS[i]))
+          .join('')}</div>
+      </section>`;
+    })
+    .join('');
+  panel.hidden = false;
+  panel.scrollTop = 0;
+  document.addEventListener('keydown', onViewsKey);
+  $('#views-close').focus({ preventScroll: true });
+  // start with your own row in view (scroll the panel only, never the page behind it)
+  const current = grid.querySelector('.view-card.current');
+  if (current) {
+    const offset = current.getBoundingClientRect().top - panel.getBoundingClientRect().top;
+    panel.scrollTop = Math.max(0, offset - panel.clientHeight / 2 + current.offsetHeight / 2);
+  }
+
+  const t = await getTheater();
+  if (panel.hidden) return;
+  const pr = t ? t.renderer.getPixelRatio() : Math.min(window.devicePixelRatio || 1, 2);
+  const canvases = [...grid.querySelectorAll('canvas[data-seat]')];
+  for (const c of canvases) {
+    const w = c.clientWidth;
+    c.width = Math.round(w * pr);
+    c.height = Math.round((w / 1.45) * pr);
+    if (!t) {
+      drawPoster(state.show.film.scene, c);
+      c.classList.add('ready');
+    }
+  }
+  if (!t) return;
+  // draw the rows you can see first, then the rest
+  const top = panel.getBoundingClientRect().top;
+  const jobs = canvases
+    .map((c) => ({ c, d: Math.abs(c.getBoundingClientRect().top - top - panel.clientHeight / 3) }))
+    .sort((a, b) => a.d - b.d)
+    .map(({ c }) => ({
+      seat: layout.byId.get(c.dataset.seat),
+      canvas: c,
+      hide: !isFree(c.dataset.seat),
+      done: () => c.classList.add('ready'),
+    }));
+  t.queueViews(jobs);
+}
+
+function closeViews({ restoreFocus = true } = {}) {
+  const panel = $('#views');
+  if (panel.hidden) return;
+  panel.hidden = true;
+  theater?.clearViews();
+  document.removeEventListener('keydown', onViewsKey);
+  if (restoreFocus) $('#views-btn').focus({ preventScroll: true });
+}
+
+function onViewsKey(e) {
+  if (e.key === 'Escape') closeViews();
+}
+
+$('#views-btn').addEventListener('click', openViews);
+$('#views-close').addEventListener('click', () => closeViews());
+$('#views-grid').addEventListener('click', (e) => {
+  const card = e.target.closest('.view-card[data-seat]');
+  if (!card) return;
+  let seat = state.layout.byId.get(card.dataset.seat);
+  if (!isFree(seat.id)) {
+    const row = state.layout.rows[seat.row].seats.filter((s) => isFree(s.id));
+    const nearest = row.sort((a, b) => Math.abs(a.arc - seat.arc) - Math.abs(b.arc - seat.arc))[0];
+    if (!nearest) return toast(`Row ${seat.rowLabel} is sold out`);
+    toast(`${seat.id} is taken, so here’s ${nearest.id}, the closest free seat`);
+    seat = nearest;
+  }
+  closeViews({ restoreFocus: false });
+  if (sheet.open) sheet.toggle(false);
+  setFocus(seat);
 });
 
 /* ---------- review ---------- */

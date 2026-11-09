@@ -4,6 +4,7 @@
 import * as THREE from '../vendor/three.module.min.js';
 import { drawScene } from './films.js';
 
+const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 const FILM_W = 1024;
 const FILM_H = 428;
 const reduceMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -526,8 +527,10 @@ export class Theater {
     const color = new THREE.Color();
     const hair = [0x0b0908, 0x120d0a, 0x1a120d, 0x24180f, 0x2e2117, 0x4a3b2e, 0x161616, 0x0e0e10];
     let n = 0;
+    this.headIndex = new Map();
     for (const s of seats) {
       if (!taken.has(s.id)) continue;
+      this.headIndex.set(s.id, n);
       const rand = mulberry(s.id);
       const lean = (rand() - 0.5) * 0.09;
       const scale = 0.9 + rand() * 0.22;
@@ -778,8 +781,83 @@ export class Theater {
     this.onFrame?.();
     this.drawFilm(nowMs / 1000);
     this.updateLights();
+    this.renderViews();
     this.updateCamera(nowMs);
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /* ---------- small views from other seats ---------- */
+
+  /** jobs: [{ seat, canvas, done }]. Each canvas gets the view from that seat, drawn a few
+   *  per frame so the main view keeps running. */
+  queueViews(jobs) {
+    this.viewQueue = jobs.slice();
+  }
+
+  clearViews() {
+    this.viewQueue = [];
+  }
+
+  renderViews(budgetMs = 12) {
+    if (!this.viewQueue?.length) return;
+    const r = this.renderer;
+    const pr = r.getPixelRatio();
+    if (!this.viewCam) {
+      this.viewCam = new THREE.PerspectiveCamera(60, 1, 0.05, 120);
+      this.viewCam.rotation.order = 'YXZ';
+    }
+    const cam = this.viewCam;
+    const near = cam.near;
+    const start = performance.now();
+    const target = new THREE.Vector3();
+    r.setScissorTest(true);
+    let drawn = 0;
+    while (this.viewQueue.length && (drawn === 0 || performance.now() - start < budgetMs)) {
+      const job = this.viewQueue.shift();
+      const out = job.canvas;
+      if (!out.isConnected || !out.width) continue;
+      // render into the bottom-left corner of the canvas, copy it out, and the full
+      // frame drawn straight after covers it before anything reaches the screen
+      const w = out.width / pr;
+      const h = out.height / pr;
+      if (out.width > this.canvas.width || out.height > this.canvas.height) continue;
+      const eye = job.seat.eye;
+      cam.position.set(eye.x, eye.y, eye.z);
+      target.set(0, this.layout.screen.centerY, 0).sub(cam.position).normalize();
+      cam.rotation.set(Math.asin(target.y), Math.atan2(-target.x, -target.z), 0);
+      cam.updateMatrixWorld();
+      const f = w / 1.6; // about 77° across, the same for every seat so they compare fairly
+      const px = w / 2;
+      const py = h * 0.42;
+      cam.projectionMatrix.makePerspective((-px / f) * near, ((w - px) / f) * near, (py / f) * near, (-(h - py) / f) * near, near, cam.far);
+      cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
+      r.setViewport(0, 0, w, h);
+      r.setScissor(0, 0, w, h);
+      // for a sold seat, take its owner out of the picture while we sit there
+      const hide = job.hide && this.people ? this.headIndex?.get(job.seat.id) : undefined;
+      const saved = [];
+      if (hide !== undefined) {
+        for (const mesh of [this.heads, this.bodies]) {
+          const m = new THREE.Matrix4();
+          mesh.getMatrixAt(hide, m);
+          saved.push(m);
+          mesh.setMatrixAt(hide, ZERO);
+          mesh.instanceMatrix.needsUpdate = true;
+        }
+      }
+      r.render(this.scene, cam);
+      if (hide !== undefined) {
+        [this.heads, this.bodies].forEach((mesh, k) => {
+          mesh.setMatrixAt(hide, saved[k]);
+          mesh.instanceMatrix.needsUpdate = true;
+        });
+      }
+      out.getContext('2d').drawImage(this.canvas, 0, this.canvas.height - out.height, out.width, out.height, 0, 0, out.width, out.height);
+      job.done?.();
+      drawn++;
+    }
+    r.setScissorTest(false);
+    r.setViewport(0, 0, this.size.w, this.size.h);
   }
 
   /** JPEG of the view from the current seat, looking straight at the screen. */
