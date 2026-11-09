@@ -480,6 +480,9 @@ svg {
 }
 
 .theater-canvas {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
   display: block;
   width: 100%;
   height: 100%;
@@ -850,6 +853,8 @@ svg {
 }
 
 .seat-head {
+  -webkit-user-select: none;
+  user-select: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1032,6 +1037,8 @@ svg {
 .seat-map {
   border-radius: 18px;
   touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .seat-map svg {
