@@ -827,6 +827,7 @@ function renderCheckout(showId, ids) {
       total,
       created: Date.now(),
       snapshot: snap || null,
+      viewSeat: snap ? viewSeat.id : seats[0].id,
     };
     if (!store.addBooking(entry)) toast('Couldn’t save the ticket in this browser, but here it is');
     state.selected = [];
@@ -877,7 +878,7 @@ function renderTicket(id) {
     <article class="stub">
       <figure class="snap">
         ${b.snapshot ? `<img src="${b.snapshot}" alt="The view from your seat" />` : `<canvas data-scene="${show.film.scene}" width="960" height="402"></canvas>`}
-        <figcaption>Your view from ${esc(b.seats[0])}</figcaption>
+        <figcaption>Your view from ${esc(b.viewSeat || b.seats[0])}</figcaption>
       </figure>
       <div class="stub-body">
         <h2>${esc(show.film.title)}</h2>
@@ -907,7 +908,7 @@ function renderTicket(id) {
   if (c) drawPoster(show.film.scene, c);
   $('#tk-back').addEventListener('click', () => go(routes.home()));
   $('#tk-home').addEventListener('click', () => go(routes.home()));
-  $('#tk-view').addEventListener('click', () => go(routes.show(show.id, b.seats[0])));
+  $('#tk-view').addEventListener('click', () => go(routes.show(show.id, b.viewSeat || b.seats[0])));
   // two taps to cancel, so it can't happen by accident
   let armed = null;
   $('#tk-cancel').addEventListener('click', (e) => {
