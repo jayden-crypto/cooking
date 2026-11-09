@@ -113,6 +113,7 @@ test('show ids round-trip and bad ids are rejected', () => {
   assert.equal(findShow(show.id).id, show.id);
   assert.equal(findShow('nonsense'), null);
   assert.equal(findShow('2026-11-10_nope_1200'), null);
+  assert.equal(findShow('2026-11-10-nope-1200'), null);
 });
 
 test('premium rows cost more', () => {
@@ -125,4 +126,26 @@ test('heat colours run from coral to mint', () => {
   assert.equal(heatColor(0), 'rgb(255 107 94)');
   assert.equal(heatColor(100), 'rgb(143 227 176)');
   assert.equal(heatColor(68), 'rgb(243 201 105)');
+});
+
+test('page addresses round-trip and use only letters, digits and hyphens', async () => {
+  const { routes, parseRoute } = await import('../js/routes.js');
+  const show = showsFor('2026-11-12').find((s) => s.film.id === 'long-quiet');
+  for (const hash of [
+    routes.show(show.id),
+    routes.show(show.id, 'F8'),
+    routes.checkout(show.id, ['F8', 'F9', 'K12']),
+    routes.ticket('RWC-4C4'),
+    routes.home(),
+  ]) {
+    assert.match(hash, /^#[A-Za-z0-9-]+$/, hash);
+  }
+  assert.deepEqual(parseRoute(routes.show(show.id)), { page: 'show', id: show.id, seat: null });
+  assert.deepEqual(parseRoute(routes.show(show.id, 'F8')), { page: 'show', id: show.id, seat: 'F8' });
+  assert.deepEqual(parseRoute(routes.checkout(show.id, ['F8', 'K12'])), { page: 'checkout', id: show.id, seats: ['F8', 'K12'] });
+  assert.deepEqual(parseRoute('#ticket-RWC-4C4'), { page: 'ticket', ref: 'RWC-4C4' });
+  assert.equal(findShow(parseRoute(routes.show(show.id, 'F8')).id).film.title, 'The Long Quiet');
+  for (const junk of ['', '#', '#home', '#show-', '#show-2026-11-12', '#/show/x', '#checkout-x-seats-', '#settings']) {
+    assert.equal(parseRoute(junk).page, 'home', junk);
+  }
 });

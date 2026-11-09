@@ -1315,6 +1315,10 @@ svg {
   font-size: 14px;
 }
 
+.link-btn.armed {
+  color: var(--coral);
+}
+
 /* ---------- toast ---------- */
 
 .toast {

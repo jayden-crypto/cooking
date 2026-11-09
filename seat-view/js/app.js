@@ -1,5 +1,5 @@
 // Sightline: pick a showtime, look from any seat in 3D, book it.
-// Views: home (#/), seat picker (#/show/<id>), review (#/checkout/<id>/<seats>), ticket (#/ticket/<ref>).
+// Views: home, seat picker, review and ticket. Addresses are built in routes.js.
 
 import {
   CINEMA,
@@ -18,6 +18,7 @@ import {
 import { buildLayout, bestSeat, describeView, formatOffset, formatClearance } from './layout.js';
 import { drawPoster } from './films.js';
 import { SeatMap } from './seatmap.js';
+import { routes, parseRoute } from './routes.js';
 import * as store from './store.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -192,11 +193,11 @@ views.home.addEventListener('click', (e) => {
   }
   const time = e.target.closest('[data-show]');
   if (time && !time.disabled) {
-    go(`#/show/${time.dataset.show}`);
+    go(routes.show(time.dataset.show));
     return;
   }
   const ticket = e.target.closest('[data-ticket]');
-  if (ticket) go(`#/ticket/${ticket.dataset.ticket}`);
+  if (ticket) go(routes.ticket(ticket.dataset.ticket));
 });
 
 /* ---------- the 3D view (loaded on first use; three.js is the big download) ---------- */
@@ -378,7 +379,7 @@ const isFree = (id) => !state.taken.has(id) || state.mine.has(id);
 
 async function openShow(showId, focusId) {
   const show = findShow(showId);
-  if (!show) return go('#/', { replace: true });
+  if (!show) return go(routes.home(), { replace: true });
   const changed = state.show?.id !== show.id;
   const { layout, taken } = occupancy(show);
   state.show = show;
@@ -565,7 +566,7 @@ $('#continue-btn').addEventListener('click', (e) => {
   const action = e.currentTarget.dataset.action;
   if (action === 'ticket') {
     const b = store.bookings().find((x) => x.showId === state.show.id && x.seats.includes(state.focus));
-    if (b) go(`#/ticket/${b.id}`);
+    if (b) go(routes.ticket(b.id));
     return;
   }
   if (action === 'book-focus') state.selected = [state.focus];
@@ -578,7 +579,7 @@ $('#continue-btn').addEventListener('click', (e) => {
   }
   state.snapshot = theater ? safe(() => theater.snapshot()) : null;
   state.snapshotSeat = state.focus;
-  go(`#/checkout/${state.show.id}/${state.selected.join(',')}`);
+  go(routes.checkout(state.show.id, state.selected));
 });
 
 function safe(fn) {
@@ -589,7 +590,7 @@ function safe(fn) {
   }
 }
 
-$('#seats-back').addEventListener('click', () => go('#/'));
+$('#seats-back').addEventListener('click', () => go(routes.home()));
 $('#best-btn').addEventListener('click', () => {
   const best = bestSeat(state.layout, (s) => !state.taken.has(s.id) && s.id !== state.focus && !state.selected.includes(s.id));
   const current = state.layout.byId.get(state.focus);
@@ -644,10 +645,10 @@ $('#seat-map').addEventListener('keydown', (e) => {
 
 function renderCheckout(showId, ids) {
   const show = findShow(showId);
-  if (!show) return go('#/', { replace: true });
+  if (!show) return go(routes.home(), { replace: true });
   const { layout, taken } = occupancy(show);
   const seats = ids.map((id) => layout.byId.get(id)).filter((s) => s && !taken.has(s.id));
-  if (!seats.length) return go(`#/show/${showId}`, { replace: true });
+  if (!seats.length) return go(routes.show(showId), { replace: true });
   const aud = show.aud;
   const total = seats.reduce((sum, s) => sum + priceOf(s, aud), 0);
   const viewSeat = layout.byId.get(state.snapshotSeat) || seats[0];
@@ -680,7 +681,7 @@ function renderCheckout(showId, ids) {
     <button class="btn primary block" id="confirm-btn">Confirm booking</button>`;
 
   views.checkout.querySelector('canvas[data-scene]') && drawPoster(show.film.scene, views.checkout.querySelector('canvas'));
-  $('#co-back').addEventListener('click', () => go(`#/show/${showId}`));
+  $('#co-back').addEventListener('click', () => go(routes.show(showId)));
   $('#confirm-btn').addEventListener('click', () => {
     const entry = {
       id: store.newRef(),
@@ -693,7 +694,7 @@ function renderCheckout(showId, ids) {
     if (!store.addBooking(entry)) toast('Couldn’t save the ticket in this browser, but here it is');
     state.selected = [];
     state.justBooked = entry;
-    go(`#/ticket/${entry.id}`, { replace: true });
+    go(routes.ticket(entry.id), { replace: true });
   });
 }
 
@@ -717,7 +718,7 @@ function renderTicket(id) {
   const b = store.booking(id) || (state.justBooked?.id === id ? state.justBooked : null);
   if (!b) {
     toast('That ticket isn’t saved in this browser');
-    return go('#/', { replace: true });
+    return go(routes.home(), { replace: true });
   }
   const show = findShow(b.showId);
   const layout = layoutFor(show.aud);
@@ -767,32 +768,45 @@ function renderTicket(id) {
 
   const c = views.ticket.querySelector('canvas[data-scene]');
   if (c) drawPoster(show.film.scene, c);
-  $('#tk-back').addEventListener('click', () => go('#/'));
-  $('#tk-home').addEventListener('click', () => go('#/'));
-  $('#tk-view').addEventListener('click', () => go(`#/show/${show.id}/${b.seats[0]}`));
-  $('#tk-cancel').addEventListener('click', () => {
-    if (!confirm('Cancel this booking? The seats go back on sale.')) return;
+  $('#tk-back').addEventListener('click', () => go(routes.home()));
+  $('#tk-home').addEventListener('click', () => go(routes.home()));
+  $('#tk-view').addEventListener('click', () => go(routes.show(show.id, b.seats[0])));
+  // two taps to cancel, so it can't happen by accident
+  let armed = null;
+  $('#tk-cancel').addEventListener('click', (e) => {
+    const btn = e.currentTarget;
+    if (!armed) {
+      btn.textContent = 'Tap again to cancel. The seats go back on sale.';
+      btn.classList.add('armed');
+      armed = setTimeout(() => {
+        armed = null;
+        btn.textContent = 'Cancel this booking';
+        btn.classList.remove('armed');
+      }, 4000);
+      return;
+    }
+    clearTimeout(armed);
     store.removeBooking(b.id);
     if (state.justBooked?.id === b.id) state.justBooked = null;
     toast('Booking cancelled');
-    go('#/', { replace: true });
+    go(routes.home(), { replace: true });
   });
 }
 
 /* ---------- routing ---------- */
 
 function route() {
-  const [page, a, b] = location.hash.replace(/^#\/?/, '').split('/').map(decodeURIComponent);
-  if (page === 'show' && a) {
-    openShow(a, b);
+  const r = parseRoute(location.hash);
+  if (r.page === 'show') {
+    openShow(r.id, r.seat);
     return;
   }
-  if (page === 'checkout' && a && b) {
+  if (r.page === 'checkout') {
     showView('checkout');
-    renderCheckout(a, b.split(','));
-  } else if (page === 'ticket' && a) {
+    renderCheckout(r.id, r.seats);
+  } else if (r.page === 'ticket') {
     showView('ticket');
-    renderTicket(a);
+    renderTicket(r.ref);
   } else {
     showView('home');
     renderHome();

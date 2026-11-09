@@ -152,7 +152,7 @@ export function upcomingDays(count = 6, from = new Date()) {
 
 export function showsFor(day) {
   return PROGRAMME.map(([film, time, screen]) => ({
-    id: `${day}_${film}_${time.replace(':', '')}`,
+    id: `${day}-${film}-${time.replace(':', '')}`,
     day,
     time,
     film: FILMS.find((f) => f.id === film),
@@ -161,9 +161,9 @@ export function showsFor(day) {
 }
 
 export function findShow(id) {
-  const [day, film, hhmm] = String(id).split('_');
-  if (!day || !film || !hhmm) return null;
-  return showsFor(day).find((s) => s.id === id) || null;
+  const m = /^(\d{4}-\d{2}-\d{2})-[a-z][a-z-]*-\d{4}$/.exec(String(id));
+  if (!m) return null;
+  return showsFor(m[1]).find((s) => s.id === id) || null;
 }
 
 export function hasStarted(show, now = new Date()) {

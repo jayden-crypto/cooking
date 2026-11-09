@@ -48,7 +48,8 @@ On [Vercel](https://vercel.com): **Add New → Project**, pick this repository, 
 | `js/seatmap.js` | SVG seat map built from the layout, with tap, drag-to-scrub and heat-map colouring. |
 | `js/data.js` | The cinema, screens, films, showtimes, prices and seeded seat sales. |
 | `js/store.js` | Bookings and preferences in `localStorage`. |
-| `js/app.js` | Screens, routing, the pull-up sheet, booking flow. |
+| `js/app.js` | Screens, the pull-up sheet, booking flow. |
+| `js/routes.js` | Page addresses like `#show-2026-11-12-tidewater-2000-seat-F8`, so a seat view can be shared as a link. |
 | `vendor/` | three.js r170 (MIT), so the app works without a CDN. |
 
 ### Scoring
