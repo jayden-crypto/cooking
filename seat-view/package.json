@@ -1,0 +1,11 @@
+{
+  "name": "sightline",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cinema booking concept: see the exact view from your seat before you book",
+  "type": "module",
+  "scripts": {
+    "dev": "node serve.js",
+    "test": "node --test"
+  }
+}

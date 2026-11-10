@@ -66,3 +66,7 @@ npm run try -- <link>   # print what the app would save for a link
 | `lib/ai.js` | Optional Claude recipe cleanup |
 | `lib/web.js` | TikTok/YouTube (oEmbed) and recipe websites (schema.org data) |
 | `lib/http.js` | Outbound fetches with timeouts, size limits and blocking of private addresses |
+
+## Also in this repo: Sightline
+
+[`seat-view/`](seat-view/) is a separate app: a cinema booking concept where you see the exact view from your seat, in 3D, before you book. See its [README](seat-view/README.md).
