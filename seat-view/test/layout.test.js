@@ -203,3 +203,45 @@ test('isTogether spots gaps, aisles and mixed rows', async () => {
   assert.equal(isTogether(L, ['F9', 'G10']), false, 'different rows');
   assert.equal(isTogether(L, ['F9', 'Z99']), false);
 });
+
+test('each room has two step-free wheelchair spaces with a companion seat beside each', async () => {
+  const { seatType } = await import('../js/data.js');
+  for (const L of Object.values(layouts)) {
+    const spaces = L.seats.filter((s) => s.access === 'space');
+    const companions = L.seats.filter((s) => s.access === 'companion');
+    assert.equal(spaces.length, 2, L.aud.id);
+    assert.equal(companions.length, 2, L.aud.id);
+    for (const sp of spaces) {
+      assert.equal(sp.floorY, 0, 'step-free');
+      assert.ok(sp.aisle || L.rows[sp.row].seats.some((n) => n.block !== sp.block && Math.abs(n.number - sp.number) === 1), 'next to an aisle');
+      const row = L.rows[sp.row].seats;
+      const i = row.indexOf(sp);
+      const neighbour = [row[i - 1], row[i + 1]].find((n) => n && n.block === sp.block);
+      assert.equal(neighbour.access, 'companion', `${sp.id} has a companion beside it`);
+      assert.equal(seatType(sp, L.aud), 'Wheelchair space');
+      assert.equal(seatType(neighbour, L.aud), 'Companion seat');
+    }
+  }
+});
+
+test('best seats and groups never hand a wheelchair space to someone who did not choose it', async () => {
+  const { seatGroups, groupAround } = await import('../js/layout.js');
+  const L = layouts.grand;
+  const general = (s) => s.access !== 'space';
+  assert.ok(seatGroups(L, 2, general).every((g) => g.seats.every(general)));
+  assert.ok(seatGroups(L, 1, general).every((g) => g.seats.every(general)));
+  // but from the space itself, a pair is the space plus its companion
+  const space = L.seats.find((s) => s.access === 'space');
+  const pair = groupAround(L, space, 2, () => true);
+  assert.equal(pair.moved, false);
+  assert.deepEqual(pair.seats.map((s) => s.access).sort(), ['companion', 'space']);
+});
+
+test('the home page skips days where every showing has started', async () => {
+  const { firstBookableDay, upcomingDays } = await import('../js/data.js');
+  const lateNight = new Date(2026, 10, 12, 23, 30);
+  const days = upcomingDays(6, lateNight);
+  assert.equal(firstBookableDay(days, lateNight), days[1].key);
+  const morning = new Date(2026, 10, 12, 9, 0);
+  assert.equal(firstBookableDay(upcomingDays(6, morning), morning), days[0].key);
+});

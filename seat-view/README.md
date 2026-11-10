@@ -10,6 +10,8 @@ Pick a showtime and you're dropped into a 3D model of that screen, looking from 
 
 Tap **Compare views** to see the view from the left, centre and right of every row side by side, rendered live from each seat (sold ones too, dimmed). Tap any of them to sit there.
 
+Every room has two step-free **wheelchair spaces** at the aisle ends of the front row, each with a companion seat beside it. They're marked on the map and never handed out by *Best available* or the group finder unless you start from one.
+
 Going with friends? Set how many of you there are with **− 2 +** next to the book button. Wherever you look from, the app keeps your group side by side around that seat (never across an aisle) and shows them on the map. If the seats next to you are taken it says so and offers the nearest group that fits. **Best 2 together** jumps to the best pair in the room, and tapping it again steps through the next best.
 
 On a phone, tap the phone icon at the top to **look around by moving your phone**. Double-tap the view to re-centre. Tilt needs the app opened on its own site over https; browsers block motion sensors inside embedded previews.
@@ -27,6 +29,7 @@ The ticket keeps a picture of your view.
 | **3 screens** | *Grand* (16 m curved screen, 286 seats), *Studio* (11 m, 180 seats), *Salon* (8.5 m, 72 recliners). Each has its own rake, row spacing, aisles and curved rows. |
 | **5 films** | Original animated scenes drawn live on the 3D screen. The room is lit by whatever's on screen. |
 | **A week of showtimes** | 12 a day. Seats sold depend on the film, the time of day and how good the seat is, so evening shows fill up and the sweet spots go first. |
+| **Built for phones** | The 3D view renders at 1.5× on phones and drops its resolution a notch if frames run slow, survives the browser taking the WebGL context away, and shows the film's poster while the 3D library (690 KB, once) downloads. |
 
 ## Run it
 
@@ -49,7 +52,7 @@ On [Vercel](https://vercel.com): **Add New → Project**, pick this repository, 
 | File | What it does |
 | --- | --- |
 | `js/layout.js` | Turns a screen's spec (screen size, rows, blocks, rake, spacing) into seat positions and eye heights, then works out each seat's distance, field of view, offset, viewing angles, sightline clearance and a 0–100 score. The 3D room, the map and the numbers all come from here, so they always agree. |
-| `js/theater.js` | The 3D room (three.js): curved stepped floor, instanced seats with velvet shading, heads for sold seats, curtains, aisle lights. The camera sits at the seat's eye height with a fixed lens, so seats can be compared fairly. |
+| `js/theater.js` | The 3D room (three.js): curved stepped floor, instanced seats with velvet shading, an audience (head, hair, shoulders) for sold seats, curtains, aisle lights. The camera sits at the seat's eye height with a fixed lens, so seats can be compared fairly. Also the tilt-to-look and the small per-seat views. |
 | `js/films.js` | The five films, drawn on a canvas each frame and used as the screen texture and the posters. |
 | `js/seatmap.js` | SVG seat map built from the layout, with tap, drag-to-scrub and heat-map colouring. |
 | `js/data.js` | The cinema, screens, films, showtimes, prices and seeded seat sales. |

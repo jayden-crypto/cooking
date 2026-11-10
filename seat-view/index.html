@@ -24,6 +24,10 @@
     <!-- Seat picker: the 3D view from the seat, with a sheet of details and the seat map -->
     <section id="seats" class="view seats" aria-label="Choose your seat" hidden>
       <div class="stage" id="stage">
+        <div class="stage-loading" id="stage-loading" hidden aria-live="polite">
+          <canvas width="640" height="268" aria-hidden="true"></canvas>
+          <p><span class="spinner" aria-hidden="true"></span>Setting up the room</p>
+        </div>
         <div class="stage-fallback" id="stage-fallback" hidden>
           <canvas width="640" height="268"></canvas>
           <p>This browser can’t show the 3D view, but the numbers below still tell you what each seat is like.</p>
@@ -95,6 +99,7 @@
             <div class="legend">
               <span><i class="lg free"></i>Free</span>
               <span id="lg-premium"><i class="lg premium"></i>Premium</span>
+              <span><i class="lg space"></i>Wheelchair</span>
               <span><i class="lg taken"></i>Taken</span>
               <span><i class="lg focus"></i>Viewing</span>
               <span><i class="lg selected"></i>Your seats</span>

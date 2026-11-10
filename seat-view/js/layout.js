@@ -78,6 +78,7 @@ export function buildLayout(aud) {
           eye,
           aisle: i === 0 ? 'left' : i === count - 1 ? 'right' : null,
           premium: aud.allPremium || r >= premiumFrom,
+          access: null,
         };
         seats.push(seat);
         row.seats.push(seat);
@@ -85,6 +86,19 @@ export function buildLayout(aud) {
       }
       s += count * aud.seatPitch + aud.aisleWidth;
     });
+  }
+
+  // wheelchair spaces: the aisle ends of the middle block on a step-free row, each with a
+  // companion seat beside it
+  if (aud.accessRow != null && rows[aud.accessRow]?.floorY === 0) {
+    const row = rows[aud.accessRow];
+    const middle = row.seats.filter((s) => s.block === Math.floor(blocks.length / 2));
+    if (middle.length >= 4) {
+      middle[0].access = 'space';
+      middle[1].access = 'companion';
+      middle[middle.length - 1].access = 'space';
+      middle[middle.length - 2].access = 'companion';
+    }
   }
 
   const back = rows[rows.length - 1];

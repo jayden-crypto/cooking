@@ -81,19 +81,27 @@ export class SeatMap {
       this.pos.set(seat.id, { x: seat.x, y });
       // follow the row's curve as it looks once squashed
       const rot = (-Math.atan(DEPTH * Math.tan(seat.yaw)) * 180) / Math.PI;
-      const node = el(
-        'rect',
-        {
-          x: (seat.x - seatW / 2).toFixed(3),
-          y: (y - seatD / 2).toFixed(3),
-          width: seatW.toFixed(3),
-          height: seatD.toFixed(3),
-          rx: (seatD * 0.32).toFixed(3),
-          transform: `rotate(${rot.toFixed(2)} ${seat.x.toFixed(3)} ${y.toFixed(3)})`,
-          class: 'map-seat',
-        },
-        g,
-      );
+      const attrs = {
+        x: (seat.x - seatW / 2).toFixed(3),
+        y: (y - seatD / 2).toFixed(3),
+        width: seatW.toFixed(3),
+        height: seatD.toFixed(3),
+        rx: (seatD * 0.32).toFixed(3),
+      };
+      const transform = `rotate(${rot.toFixed(2)} ${seat.x.toFixed(3)} ${y.toFixed(3)})`;
+      let node;
+      if (seat.access === 'space' && !this.mini) {
+        // a wheelchair space: the seat shape with the access symbol on it
+        node = el('g', { class: 'map-seat space', transform }, g);
+        el('rect', attrs, node);
+        const k = Math.min(seatW, seatD) * 0.036;
+        const glyph = el('g', { class: 'map-access', transform: `translate(${(seat.x - 12 * k).toFixed(3)} ${(y - 12 * k).toFixed(3)}) scale(${k.toFixed(4)})` }, node);
+        el('circle', { cx: 12, cy: 4.4, r: 2.2 }, glyph);
+        el('path', { d: 'M11.5 8.5v5.5h5.5l2.6 5.6' }, glyph);
+        el('path', { d: 'M8.6 11.2a5.6 5.6 0 1 0 7.4 7.4' }, glyph);
+      } else {
+        node = el('rect', { ...attrs, transform, class: seat.access === 'space' ? 'map-seat space' : 'map-seat' }, g);
+      }
       this.nodes.set(seat.id, node);
     }
 
@@ -124,6 +132,7 @@ export class SeatMap {
       const node = this.nodes.get(seat.id);
       const taken = state.taken.has(seat.id) && !state.mine.has(seat.id);
       const cls = ['map-seat'];
+      if (seat.access === 'space') cls.push('space');
       if (taken) cls.push('taken');
       else if (state.mine.has(seat.id)) cls.push('mine');
       if (seat.premium && !this.mini) cls.push('premium');

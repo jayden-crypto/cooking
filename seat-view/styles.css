@@ -432,6 +432,7 @@ svg {
 .time span {
   color: var(--muted);
   font-size: 12px;
+  white-space: nowrap;
 }
 
 .time i {
@@ -511,6 +512,50 @@ svg {
   border-radius: 12px;
 }
 
+.stage-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: start;
+  justify-content: center;
+  gap: 16px;
+  justify-items: center;
+  padding-top: calc(var(--safe-top) + 96px);
+  background: #000;
+}
+
+.stage-loading canvas {
+  width: min(78vw, 420px);
+  height: auto;
+  border-radius: 14px;
+  opacity: 0.55;
+  filter: blur(1px) saturate(0.8);
+}
+
+.stage-loading p {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  color: var(--soft);
+  font-size: 14px;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgb(255 255 255 / 20%);
+  border-top-color: var(--mint);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .stage-shade {
   position: absolute;
   inset: 0 0 auto;
@@ -563,7 +608,7 @@ svg {
   white-space: nowrap;
   text-overflow: ellipsis;
   color: var(--soft);
-  font-size: 12.5px;
+  font-size: 12px;
   text-shadow: 0 1px 12px rgb(0 0 0 / 60%);
 }
 
@@ -1113,6 +1158,28 @@ svg {
   fill: rgb(255 255 255 / 7%);
 }
 
+.map-seat.space {
+  fill: rgb(156 200 255 / 34%);
+}
+
+.map-access {
+  fill: none;
+  stroke: rgb(255 255 255 / 85%);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.map-seat.taken .map-access {
+  stroke: rgb(255 255 255 / 25%);
+}
+
+.map-seat.focus .map-access,
+.map-seat.selected .map-access {
+  stroke: #0b2016;
+}
+
 .map-seat.mine {
   fill: rgb(143 227 176 / 35%);
 }
@@ -1132,6 +1199,28 @@ svg {
 
 .mini-map .map-seat.taken {
   fill: rgb(255 255 255 / 7%);
+}
+
+.map-seat.space {
+  fill: rgb(156 200 255 / 34%);
+}
+
+.map-access {
+  fill: none;
+  stroke: rgb(255 255 255 / 85%);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.map-seat.taken .map-access {
+  stroke: rgb(255 255 255 / 25%);
+}
+
+.map-seat.focus .map-access,
+.map-seat.selected .map-access {
+  stroke: #0b2016;
 }
 
 .mini-map .map-screen {
@@ -1171,6 +1260,10 @@ svg {
 
 .lg.taken {
   background: rgb(255 255 255 / 7%);
+}
+
+.lg.space {
+  background: rgb(156 200 255 / 34%);
 }
 
 .lg.focus {
@@ -1716,9 +1809,18 @@ svg {
   .seat-map svg {
     max-height: none;
   }
+
+  .stage-loading {
+    align-content: center;
+    padding-top: 0;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2s;
+  }
+
   .views,
   .view-card canvas {
     animation: none;

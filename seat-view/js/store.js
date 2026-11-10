@@ -54,7 +54,7 @@ export function removeBooking(id) {
 }
 
 export function prefs() {
-  return { people: true, heat: false, party: 1, ...read(PREFS, {}) };
+  return { people: true, heat: false, hintSeen: false, ...read(PREFS, {}) };
 }
 
 export function setPref(name, value) {

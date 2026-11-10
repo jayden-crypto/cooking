@@ -12,6 +12,8 @@ export const AUDITORIUMS = {
     id: 'grand',
     name: 'Screen 1',
     format: 'Grand',
+    tag: 'Big screen',
+    accessRow: 0,
     screenWidth: 16,
     screenBottom: 1.4,
     curve: 2.2,
@@ -29,6 +31,8 @@ export const AUDITORIUMS = {
     id: 'studio',
     name: 'Screen 3',
     format: 'Studio',
+    tag: 'Standard',
+    accessRow: 0,
     screenWidth: 11,
     screenBottom: 1.2,
     curve: 0,
@@ -46,7 +50,9 @@ export const AUDITORIUMS = {
     id: 'salon',
     name: 'Screen 5',
     format: 'Salon',
+    tag: 'Recliners',
     style: 'recliner',
+    accessRow: 0,
     screenWidth: 8.5,
     screenBottom: 1.1,
     curve: 0,
@@ -134,6 +140,11 @@ const PROGRAMME = [
 export function dayKey(date) {
   const d = new Date(date);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** The first listed day that still has a showing you can book. */
+export function firstBookableDay(days, now = new Date()) {
+  return days.find((d) => showsFor(d.key).some((s) => !hasStarted(s, now)))?.key || days[0].key;
 }
 
 export function upcomingDays(count = 6, from = new Date()) {
@@ -224,8 +235,15 @@ export function priceOf(seat, aud) {
 }
 
 export function seatType(seat, aud) {
+  if (seat.access === 'space') return 'Wheelchair space';
+  if (seat.access === 'companion') return 'Companion seat';
   if (aud.style === 'recliner') return 'Recliner';
   return seat.premium ? 'Premium' : 'Standard';
+}
+
+/** Lowest price in the room, for the showtime buttons. */
+export function priceFrom(aud) {
+  return Math.min(aud.prices.standard, aud.prices.premium);
 }
 
 export const money = (n) =>

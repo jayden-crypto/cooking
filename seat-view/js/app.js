@@ -14,6 +14,8 @@ import {
   money,
   formatRuntime,
   dayKey,
+  priceFrom,
+  firstBookableDay,
 } from './data.js';
 import { buildLayout, bestSeat, describeView, formatOffset, formatClearance, seatGroups, groupAround } from './layout.js';
 import { drawPoster } from './films.js';
@@ -36,6 +38,7 @@ const ICON = {
   aisle: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3v18M16 3v18M12 6v2M12 11v2M12 16v2"/></svg>',
   star: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.4 6.7 19.4l1.2-6L3.4 9.3l6-.7z"/></svg>',
   up: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>',
+  access: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="4.4" r="2"/><path d="M11.5 8.5v5.5h5.5l2.6 5.6"/><path d="M8.6 11.2a5.6 5.6 0 1 0 7.4 7.4"/></svg>',
   ticket: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5A1.5 1.5 0 0 1 5.5 6h13A1.5 1.5 0 0 1 20 7.5V10a2 2 0 0 0 0 4v2.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 16.5V14a2 2 0 0 0 0-4z"/><path d="M14 6v12" stroke-dasharray="2 2.2"/></svg>',
 };
 
@@ -51,7 +54,7 @@ function layoutFor(aud) {
 }
 
 const state = {
-  day: dayKey(new Date()),
+  day: firstBookableDay(upcomingDays(6)),
   show: null,
   layout: null,
   taken: new Set(),
@@ -59,7 +62,7 @@ const state = {
   focus: null,
   bestCycle: null,
   prefs: store.prefs(),
-  party: Math.max(1, Math.min(8, Number(store.prefs().party) || 1)),
+  party: 1,
   snapshot: null,
   justBooked: null,
 };
@@ -163,9 +166,9 @@ function filmCard(film, shows) {
       const pct = taken.size / layout.seats.length;
       const started = hasStarted(show);
       const cls = pct > 0.9 ? 'full' : pct > 0.7 ? 'busy' : '';
-      const note = started ? 'Started' : pct > 0.9 ? 'Almost full' : show.aud.format;
+      const note = started ? 'Started' : pct > 0.9 ? 'Almost full' : `${show.aud.tag} · ${money(priceFrom(show.aud))}`;
       return `<button class="time ${cls}" data-show="${show.id}" ${started ? 'disabled' : ''}
-          aria-label="${show.time}, ${esc(show.aud.name)} ${esc(show.aud.format)}, ${Math.round(pct * 100)}% sold">
+          aria-label="${show.time}, ${esc(show.aud.name)}, ${esc(show.aud.tag)}, from ${money(priceFrom(show.aud))}, ${Math.round(pct * 100)}% sold">
           <b>${show.time}</b><span>${esc(note)}</span><i style="--fill:${Math.round(pct * 100)}%"></i></button>`;
     })
     .join('');
@@ -220,14 +223,29 @@ function getTheater() {
       if (!webglAvailable()) throw new Error('no webgl');
       theater = new Theater($('#stage'));
       theater.onFrame = syncRegion;
-      theater.onLook = hideHint;
+      theater.onLook = () => {
+        hideHint();
+        if (!state.prefs.hintSeen) {
+          state.prefs.hintSeen = true;
+          store.setPref('hintSeen', true);
+        }
+      };
+      theater.onFirstFrame = () => {
+        $('#stage-loading').hidden = true;
+        maybeHint();
+      };
+      theater.onContextLost = () => {
+        $('#stage-loading').hidden = false;
+        $('#stage-loading p').lastChild.textContent = 'Restarting the 3D view';
+      };
+      theater.onContextRestored = () => ($('#stage-loading').hidden = true);
       theater.setPeople(state.prefs.people);
       return theater;
     })
     .catch((err) => {
       console.warn('3D view unavailable', err);
-      const fb = $('#stage-fallback');
-      fb.hidden = false;
+      $('#stage-loading').hidden = true;
+      $('#stage-fallback').hidden = false;
       return null;
     });
   return theaterLoad;
@@ -256,6 +274,9 @@ function syncRegion() {
 }
 
 let hintTimer;
+function maybeHint() {
+  if (!state.prefs.hintSeen && !views.seats.hidden) showHint();
+}
 function showHint() {
   const hint = $('#look-hint');
   hint.classList.remove('gone');
@@ -390,6 +411,8 @@ const miniMap = new SeatMap($('#mini-svg'), { mini: true });
 const isFree = (id) => !state.taken.has(id) || state.mine.has(id);
 // seats you can still buy (your own bookings you can look from, but not buy again)
 const isBuyable = (seat) => !state.taken.has(seat.id);
+// wheelchair spaces stay out of "best seat" and group searches unless you start from one
+const isGeneral = (seat) => isBuyable(seat) && seat.access !== 'space';
 const middleOf = (group) => group.seats[Math.floor((group.seats.length - 1) / 2)];
 
 async function openShow(showId, focusId) {
@@ -410,13 +433,13 @@ async function openShow(showId, focusId) {
   if (requested && isFree(requested.id)) state.focus = requested.id;
   if (!state.focus || !isFree(state.focus)) {
     // start where the best group for your party would sit
-    const best = seatGroups(layout, state.party, isBuyable)[0];
-    state.focus = (best ? middleOf(best) : bestSeat(layout, isBuyable) || layout.seats[0]).id;
+    const best = seatGroups(layout, state.party, isGeneral)[0];
+    state.focus = (best ? middleOf(best) : bestSeat(layout, isGeneral) || layout.seats[0]).id;
   }
 
   showView('seats');
   $('#seats-film').textContent = show.film.title;
-  $('#seats-when').textContent = `${dayLabel(show.day)} ${show.time} · ${show.aud.name} ${show.aud.format}`;
+  $('#seats-when').textContent = `${dayLabel(show.day)} ${show.time} · ${show.aud.name}`;
   $('#lg-premium').hidden = !layout.seats.some((s) => s.premium) || show.aud.style === 'recliner';
   $('#people-btn').setAttribute('aria-pressed', String(state.prefs.people));
   $('#heat-toggle').checked = state.prefs.heat;
@@ -434,17 +457,29 @@ async function openShow(showId, focusId) {
     sheet.body.scrollTop = 0;
   }
   requestAnimationFrame(() => sheet.measure({ ref: true }));
-  showHint();
 
-  const fb = $('#stage-fallback canvas');
-  drawPoster(show.film.scene, fb);
+  // while the 3D room loads, the film's poster stands in for it
+  drawPoster(show.film.scene, $('#stage-fallback canvas'));
+  if (!theater?.firstFrameDone) {
+    drawPoster(show.film.scene, $('#stage-loading canvas'));
+    $('#stage-loading').hidden = false;
+  }
   const t = await getTheater();
   if (!t || views.seats.hidden || state.show !== show) return;
-  if (changed || t.layout !== layout) t.resetFlight();
+  // the fly-in from the back is an introduction: once per room is enough
+  const roomChanged = t.layout !== layout;
+  const firstVisit = !seenRooms.has(layout.aud.id);
+  if (firstVisit) {
+    seenRooms.add(layout.aud.id);
+    t.resetFlight();
+  }
   t.setShow({ layout, scene: show.film.scene, taken: audienceFor() });
-  t.focusSeat(layout.byId.get(state.focus));
+  t.focusSeat(layout.byId.get(state.focus), { instant: roomChanged && !firstVisit });
   t.start();
+  if (t.firstFrameDone) maybeHint();
 }
+
+const seenRooms = new Set();
 
 /** Heads in the 3D room: everyone else who has bought a seat (not you or your group). */
 function audienceFor() {
@@ -477,7 +512,7 @@ function pickSeat(seat) {
 function currentGroup() {
   const focus = state.layout.byId.get(state.focus);
   if (!focus || state.mine.has(focus.id)) return null;
-  return groupAround(state.layout, focus, state.party, isBuyable);
+  return groupAround(state.layout, focus, state.party, focus.access === 'space' ? isBuyable : isGeneral);
 }
 
 function setParty(n) {
@@ -485,7 +520,6 @@ function setParty(n) {
   if (next === state.party) return;
   state.party = next;
   state.bestCycle = null;
-  store.setPref('party', next);
   updateMaps();
   updateActions();
 }
@@ -534,7 +568,9 @@ function updateSeatInfo() {
   const clear = m.clearance === null || m.clearance >= 0.06;
   facts.push(`<li class="${clear ? 'ok' : 'meh'}">${clear ? ICON.eye : ICON.warn}${esc(formatClearance(m.clearance))}</li>`);
   if (m.lookUp > 12) facts.push(`<li class="meh">${ICON.up}Looking up ${Math.round(m.lookUp)}°</li>`);
-  if (seat.aisle) facts.push(`<li class="ok">${ICON.aisle}Aisle seat</li>`);
+  if (seat.access === 'space') facts.push(`<li class="ok">${ICON.access}Step-free wheelchair space</li>`);
+  else if (seat.access === 'companion') facts.push(`<li class="ok">${ICON.access}Companion seat, beside a wheelchair space</li>`);
+  else if (seat.aisle) facts.push(`<li class="ok">${ICON.aisle}Aisle seat</li>`);
   if (seat.premium && aud.style !== 'recliner') facts.push(`<li class="ok">${ICON.star}Premium, extra legroom</li>`);
   if (aud.style === 'recliner') facts.push(`<li class="ok">${ICON.star}Fully reclining</li>`);
   $('#seat-facts').innerHTML = facts.join('');
@@ -641,7 +677,7 @@ $('#seats-back').addEventListener('click', () => go(routes.home()));
 // best group for your party; tap again for the next best
 $('#best-btn').addEventListener('click', () => {
   const n = state.party;
-  const groups = seatGroups(state.layout, n, isBuyable);
+  const groups = seatGroups(state.layout, n, isGeneral);
   if (!groups.length) {
     toast(n > 1 ? `No ${n} seats together left for this showing` : 'This showing is sold out');
     return;
@@ -902,7 +938,7 @@ function renderCheckout(showId, ids) {
     </figure>
     <div class="card">
       <h2>${esc(show.film.title)}</h2>
-      <p class="meta">${esc(dayLabel(show.day))} · ${show.time} · ${esc(aud.name)} ${esc(aud.format)}</p>
+      <p class="meta">${esc(dayLabel(show.day))} · ${show.time} · ${esc(aud.name)} · ${esc(aud.tag)}</p>
       <ul class="lines">
         ${seats
           .map(
@@ -984,7 +1020,7 @@ function renderTicket(id) {
         <div class="stub-grid">
           <div><span>Date</span><b>${esc(dayLabel(show.day))}</b></div>
           <div><span>Time</span><b>${show.time}</b></div>
-          <div><span>Screen</span><b>${esc(show.aud.name.replace('Screen ', ''))} · ${esc(show.aud.format)}</b></div>
+          <div><span>Screen</span><b>${esc(show.aud.name.replace('Screen ', ''))} · ${esc(show.aud.tag)}</b></div>
           <div><span>${seats.length > 1 ? 'Seats' : 'Seat'}</span><b>${esc(b.seats.join(', '))}</b></div>
           <div><span>Type</span><b>${esc(types)}</b></div>
           <div><span>Paid</span><b>${money(b.total)}</b></div>

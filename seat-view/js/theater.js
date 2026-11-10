@@ -160,8 +160,13 @@ function exitTexture() {
 export class Theater {
   constructor(container) {
     this.container = container;
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    // Phones get 1.5× at most (2× costs nearly twice the pixels for little gain), and
+    // antialiasing only where the pixel ratio is low enough that it shows.
+    const coarse = window.matchMedia?.('(pointer: coarse)').matches;
+    const dpr = Math.min(window.devicePixelRatio || 1, coarse ? 1.5 : 2);
+    this.quality = { pr: dpr, cap: dpr, slow: 0, since: performance.now() };
+    this.renderer = new THREE.WebGLRenderer({ antialias: dpr < 1.5, powerPreference: 'high-performance' });
+    this.renderer.setPixelRatio(dpr);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     this.canvas = this.renderer.domElement;
@@ -204,6 +209,19 @@ export class Theater {
     this.lightColors = [new THREE.Color(0.6, 0.5, 0.4), new THREE.Color(0.6, 0.5, 0.4), new THREE.Color(0.6, 0.5, 0.4)];
 
     this.bindLook();
+    // iOS drops WebGL contexts under memory pressure; three.js rebuilds on restore, we just
+    // pause and tell the page
+    this.canvas.addEventListener('webglcontextlost', () => {
+      this.lost = true;
+      this.pause();
+      this.onContextLost?.();
+    });
+    this.canvas.addEventListener('webglcontextrestored', () => {
+      this.lost = false;
+      this.filmTex.needsUpdate = true;
+      if (this.running) this.loop();
+      this.onContextRestored?.();
+    });
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(container);
     this.resize();
@@ -252,8 +270,10 @@ export class Theater {
         side: THREE.DoubleSide,
       }),
       screen: new THREE.MeshBasicMaterial({ map: this.filmTex, toneMapped: false }),
-      head: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.65 }),
-      body: new THREE.MeshStandardMaterial({ color: 0x0c0b0d, roughness: 0.9 }),
+      head: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6 }),
+      hair: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85 }),
+      body: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 }),
+      spaceMark: new THREE.MeshBasicMaterial({ color: 0x5a5f6a, transparent: true, opacity: 0.55, depthWrite: false }),
       stepLight: new THREE.MeshBasicMaterial({ color: 0xffb066, toneMapped: false }),
       sconce: new THREE.MeshBasicMaterial({ color: 0xffc58a, toneMapped: false }),
       booth: new THREE.MeshBasicMaterial({ color: 0xfff1dc, toneMapped: false }),
@@ -386,8 +406,9 @@ export class Theater {
     // seats and armrests, instanced
     const seatGeo = seatGeometry(layout.aud.style);
     const armGeo = armGeometry(layout.aud.style);
-    const standard = seats.filter((s) => !s.premium);
-    const premium = seats.filter((s) => s.premium);
+    const chairs = seats.filter((s) => s.access !== 'space');
+    const standard = chairs.filter((s) => !s.premium);
+    const premium = chairs.filter((s) => s.premium);
     const mtx = new THREE.Matrix4();
     const quat = new THREE.Quaternion();
     const one = new THREE.Vector3(1, 1, 1);
@@ -407,14 +428,25 @@ export class Theater {
     place(premium, style === 'recliner' ? m.leather : m.velvetPremium);
 
     const arms = [];
+    const isSpace = (s) => s?.access === 'space';
     for (const row of rows) {
       row.seats.forEach((s, i) => {
         const next = row.seats[i + 1];
         const prev = row.seats[i - 1];
-        if (!prev || prev.block !== s.block) arms.push({ arc: s.arc - aud.seatPitch / 2, row });
-        if (next && next.block === s.block) arms.push({ arc: (s.arc + next.arc) / 2, row });
-        else arms.push({ arc: s.arc + aud.seatPitch / 2, row });
+        if (isSpace(s)) return; // a wheelchair space has no chair and no armrests
+        if ((!prev || prev.block !== s.block) && !isSpace(prev)) arms.push({ arc: s.arc - aud.seatPitch / 2, row });
+        if (next && next.block === s.block) {
+          if (!isSpace(next)) arms.push({ arc: (s.arc + next.arc) / 2, row });
+        } else arms.push({ arc: s.arc + aud.seatPitch / 2, row });
       });
+    }
+    // a pale outline on the floor marks each wheelchair space
+    for (const s of seats.filter(isSpace)) {
+      const mark = new THREE.Mesh(new THREE.RingGeometry(0.34, 0.38, 4, 1), m.spaceMark);
+      mark.rotation.set(-Math.PI / 2, 0, Math.PI / 4 + s.yaw);
+      mark.scale.set(1.15, 1.3, 1);
+      mark.position.set(s.x, s.floorY + 0.006, s.z + 0.12);
+      hall.add(mark);
     }
     const armMesh = new THREE.InstancedMesh(armGeo, m.arm, arms.length);
     arms.forEach((a, i) => {
@@ -426,16 +458,22 @@ export class Theater {
     });
     hall.add(armMesh);
 
-    // audience: a head and shoulders per taken seat (filled in by setTaken)
+    // audience: head, a cap of hair over the top and back, and shoulders (filled in by setTaken)
     const headGeo = new THREE.SphereGeometry(0.1, 20, 14).scale(0.8, 1.12, 0.95);
+    const hairGeo = new THREE.SphereGeometry(0.106, 20, 10, 0, Math.PI * 2, 0, Math.PI * 0.58)
+      .rotateX(0.75)
+      .scale(0.82, 1.1, 0.98)
+      .translate(0, 0.012, 0.012);
     const bodyGeo = new THREE.CapsuleGeometry(0.15, 0.22, 4, 12).rotateZ(Math.PI / 2).scale(1, 1, 0.7);
     this.heads = new THREE.InstancedMesh(headGeo, m.head, seats.length);
+    this.hairs = new THREE.InstancedMesh(hairGeo, m.hair, seats.length);
     this.bodies = new THREE.InstancedMesh(bodyGeo, m.body, seats.length);
-    this.heads.count = 0;
-    this.bodies.count = 0;
-    this.heads.frustumCulled = false;
-    this.bodies.frustumCulled = false;
-    hall.add(this.heads, this.bodies);
+    this.audience = [this.heads, this.hairs, this.bodies];
+    for (const mesh of this.audience) {
+      mesh.count = 0;
+      mesh.frustumCulled = false;
+      hall.add(mesh);
+    }
 
     // aisle step lights
     const lights = [];
@@ -537,7 +575,9 @@ export class Theater {
     const quat = new THREE.Quaternion();
     const up = new THREE.Vector3(0, 1, 0);
     const color = new THREE.Color();
-    const hair = [0x0b0908, 0x120d0a, 0x1a120d, 0x24180f, 0x2e2117, 0x4a3b2e, 0x161616, 0x0e0e10];
+    const hair = [0x0b0908, 0x120d0a, 0x1a120d, 0x24180f, 0x2e2117, 0x4a3b2e, 0x6b5a48, 0x161616, 0x0e0e10, 0x3a1f16];
+    const skin = [0xf1d3b8, 0xe4bc9a, 0xd3a37c, 0xb8805a, 0x96603f, 0x6e4530, 0x4a2e22];
+    const cloth = [0x0c0b0d, 0x12141c, 0x1a1414, 0x0f1a16, 0x1c1a24, 0x221818, 0x101010];
     let n = 0;
     this.headIndex = new Map();
     for (const s of seats) {
@@ -547,31 +587,36 @@ export class Theater {
       const lean = (rand() - 0.5) * 0.09;
       const scale = 0.9 + rand() * 0.22;
       const tall = (rand() - 0.5) * 0.12;
-      quat.setFromAxisAngle(up, s.yaw + (rand() - 0.5) * 0.4);
+      const turn = s.yaw + (rand() - 0.5) * 0.4;
+      quat.setFromAxisAngle(up, turn);
       const local = new THREE.Vector3(lean, style.eyeHeight + 0.04 + tall, style.eyeBack + 0.05).applyAxisAngle(up, s.yaw);
-      mtx.compose(new THREE.Vector3(s.x, s.floorY, s.z).add(local), quat, new THREE.Vector3(scale, scale, scale));
+      const at = new THREE.Vector3(s.x, s.floorY, s.z).add(local);
+      mtx.compose(at, quat, new THREE.Vector3(scale, scale, scale));
       this.heads.setMatrixAt(n, mtx);
-      this.heads.setColorAt(n, color.setHex(hair[Math.floor(rand() * hair.length)]));
+      this.heads.setColorAt(n, color.setHex(skin[Math.floor(rand() * skin.length)]));
+      // some hair is fuller than others; a few people have very little
+      const volume = rand() < 0.08 ? 0.3 : 0.95 + rand() * 0.25;
+      mtx.compose(at, quat, new THREE.Vector3(scale * (0.95 + volume * 0.08), scale * volume, scale * (0.95 + volume * 0.1)));
+      this.hairs.setMatrixAt(n, mtx);
+      this.hairs.setColorAt(n, color.setHex(hair[Math.floor(rand() * hair.length)]));
       const shoulders = new THREE.Vector3(lean * 0.5, style.eyeHeight - 0.27 + tall, style.eyeBack + 0.1).applyAxisAngle(up, s.yaw);
       quat.setFromAxisAngle(up, s.yaw);
       mtx.compose(new THREE.Vector3(s.x, s.floorY, s.z).add(shoulders), quat, new THREE.Vector3(scale, scale, scale));
       this.bodies.setMatrixAt(n, mtx);
+      this.bodies.setColorAt(n, color.setHex(cloth[Math.floor(rand() * cloth.length)]));
       n++;
     }
-    this.heads.count = this.people ? n : 0;
-    this.bodies.count = this.people ? n : 0;
     this.headCount = n;
-    this.heads.instanceMatrix.needsUpdate = true;
-    this.bodies.instanceMatrix.needsUpdate = true;
-    if (this.heads.instanceColor) this.heads.instanceColor.needsUpdate = true;
+    for (const mesh of this.audience) {
+      mesh.count = this.people ? n : 0;
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    }
   }
 
   setPeople(on) {
     this.people = on;
-    if (this.heads) {
-      this.heads.count = on ? this.headCount : 0;
-      this.bodies.count = on ? this.headCount : 0;
-    }
+    if (this.audience) for (const mesh of this.audience) mesh.count = on ? this.headCount : 0;
   }
 
   /* ---------- camera ---------- */
@@ -830,7 +875,28 @@ export class Theater {
   frame(nowMs) {
     if (!this.running) return;
     this.raf = requestAnimationFrame(this.frame);
+    this.adapt(nowMs);
     this.render(nowMs);
+    if (!this.firstFrameDone) {
+      this.firstFrameDone = true;
+      this.onFirstFrame?.();
+    }
+  }
+
+  /** Drop the pixel ratio a notch when frames keep running slow (and never raise it
+   *  again: a steady picture beats one that flickers between qualities). */
+  adapt(nowMs) {
+    const q = this.quality;
+    const dt = nowMs - (this.lastFrameAt || nowMs);
+    this.lastFrameAt = nowMs;
+    if (dt <= 0 || dt > 500 || nowMs - q.since < 2500 || q.pr <= 1) return; // settling, or tab was away
+    q.slow = dt > 34 ? q.slow + 1 : Math.max(0, q.slow - 1);
+    if (q.slow < 40) return;
+    q.pr = Math.max(1, q.pr - 0.25);
+    q.slow = 0;
+    q.since = nowMs;
+    this.renderer.setPixelRatio(q.pr);
+    this.renderer.setSize(this.size.w, this.size.h, false);
   }
 
   render(nowMs = performance.now()) {
@@ -894,7 +960,7 @@ export class Theater {
       const hide = job.hide && this.people ? this.headIndex?.get(job.seat.id) : undefined;
       const saved = [];
       if (hide !== undefined) {
-        for (const mesh of [this.heads, this.bodies]) {
+        for (const mesh of this.audience) {
           const m = new THREE.Matrix4();
           mesh.getMatrixAt(hide, m);
           saved.push(m);
@@ -904,7 +970,7 @@ export class Theater {
       }
       r.render(this.scene, cam);
       if (hide !== undefined) {
-        [this.heads, this.bodies].forEach((mesh, k) => {
+        this.audience.forEach((mesh, k) => {
           mesh.setMatrixAt(hide, saved[k]);
           mesh.instanceMatrix.needsUpdate = true;
         });
