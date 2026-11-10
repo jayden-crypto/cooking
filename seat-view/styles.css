@@ -1093,16 +1093,119 @@ svg {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   margin: 12px 0 8px;
 }
 
 .map-head h3 {
-  margin: 0;
+  margin: 0 auto 0 0;
   font-size: 18px;
   font-weight: 600;
+  white-space: nowrap;
+}
+
+.map-zoom {
+  display: flex;
+  gap: 4px;
+}
+
+.zoom-btn {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--card-2);
+  color: var(--text);
+  transition: transform 0.15s, color 0.2s;
+}
+
+.zoom-btn:active {
+  transform: scale(0.92);
+}
+
+.zoom-btn:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+
+.zoom-btn svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2.2;
+}
+
+/* zoomed in: seat numbers on the seats, row letters pinned to the left edge */
+
+.map-num {
+  fill: rgb(255 255 255 / 80%);
+  font-weight: 650;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+
+.seat-map svg.numbers .map-num {
+  opacity: 1;
+}
+
+.map-seat.taken .map-num {
+  fill: rgb(255 255 255 / 24%);
+}
+
+.map-seat.focus .map-num,
+.map-seat.selected .map-num {
+  fill: #0b2016;
+}
+
+.map-rows {
+  transition: opacity 0.2s;
+}
+
+.seat-map svg.zoomed .map-rows {
+  opacity: 0;
+}
+
+.map-pins {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.map-pins.on {
+  opacity: 1;
+}
+
+/* a soft strip down the left edge so the letters read without boxing out a seat */
+.map-pins::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 26px;
+  background: linear-gradient(90deg, rgb(18 18 20 / 85%), rgb(18 18 20 / 0));
+}
+
+.map-pins span {
+  position: absolute;
+  top: 0;
+  left: 3px;
+  min-width: 14px;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  text-align: center;
+  text-shadow: 0 0 6px rgb(0 0 0 / 90%);
+  will-change: transform;
 }
 
 .seat-map {
+  position: relative;
   border-radius: 18px;
   touch-action: none;
   -webkit-user-select: none;
@@ -1114,7 +1217,8 @@ svg {
   width: 100%;
   height: auto;
   max-height: 62vh;
-  overflow: visible;
+  /* zoomed in, seats outside the view must not spill over the rest of the card */
+  overflow: hidden;
 }
 
 .map-hint {

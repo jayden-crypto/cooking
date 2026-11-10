@@ -16,7 +16,7 @@ Going with friends? Set how many of you there are with **− 2 +** next to the b
 
 On a phone, tap the phone icon at the top to **look around by moving your phone**. Double-tap the view to re-centre. Tilt needs the app opened on its own site over https; browsers block motion sensors inside embedded previews.
 
-Swipe the card up for the seat map. Tap a seat to jump there, or drag your finger across the map and the 3D view follows you around the room. Drag the 3D view itself to look around. **Best available** takes you to the best free seat, and **Colour seats by view quality** turns the map into a heat map.
+Swipe the card up for the seat map. Pinch it (or double-tap, or use **+ / −**) to zoom: seat numbers appear on the seats and the row letters stay pinned to the left edge. One finger still drags across the map with the view following, and holding it at an edge scrolls the map along. Tap a seat to jump there, or drag your finger across the map and the 3D view follows you around the room. Drag the 3D view itself to look around. **Best available** takes you to the best free seat, and **Colour seats by view quality** turns the map into a heat map.
 
 The ticket keeps a picture of your view.
 
@@ -55,7 +55,7 @@ On [Vercel](https://vercel.com): **Add New → Project**, pick this repository, 
 | `js/theater.js` | The 3D room (three.js): curved stepped floor, instanced seats with velvet shading, an audience (head, hair, shoulders) for sold seats, curtains, aisle lights. The camera sits at the seat's eye height with a fixed lens, so seats can be compared fairly. Also the tilt-to-look and the small per-seat views. |
 | `js/post.js` | The picture's finish: the room renders into a multisampled HDR target, then gets a soft bloom from the screen and lights, a vignette, fine moving film grain (which also hides colour banding in the dark) and filmic tone mapping. The film itself keeps its true colours. Falls back to 8-bit on GPUs without float targets, and drops the bloom first if frames run slow. |
 | `js/films.js` | The five films, drawn on a canvas each frame and used as the screen texture and the posters. |
-| `js/seatmap.js` | SVG seat map built from the layout, with tap, drag-to-scrub and heat-map colouring. |
+| `js/seatmap.js` | SVG seat map built from the layout, with tap, drag-to-scrub, pinch/double-tap/⌘-scroll zoom and heat-map colouring. |
 | `js/data.js` | The cinema, screens, films, showtimes, prices and seeded seat sales. |
 | `js/store.js` | Bookings and preferences in `localStorage`. |
 | `js/app.js` | Screens, the pull-up sheet, booking flow. |

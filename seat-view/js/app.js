@@ -423,6 +423,9 @@ desktop.addEventListener('change', () => {
 const bigMap = new SeatMap($('#map-svg'), {
   onPreview: (seat) => setFocus(seat, { scrub: true }),
   onPick: (seat) => pickSeat(seat),
+  pins: $('#map-pins'),
+  zoomIn: $('#zoom-in'),
+  zoomOut: $('#zoom-out'),
 });
 const miniMap = new SeatMap($('#mini-svg'), { mini: true });
 
@@ -786,6 +789,18 @@ $('#seat-map').addEventListener('keydown', (e) => {
     let i = row.seats.indexOf(seat) + dir;
     while (row.seats[i] && !isFree(row.seats[i].id)) i += dir;
     next = row.seats[i];
+  } else if (e.key === '+' || e.key === '=') {
+    e.preventDefault();
+    bigMap.zoomBy(1.7);
+    return;
+  } else if (e.key === '-' || e.key === '_') {
+    e.preventDefault();
+    bigMap.zoomBy(1 / 1.7);
+    return;
+  } else if (e.key === '0') {
+    e.preventDefault();
+    bigMap.fit();
+    return;
   } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
     const dir = e.key === 'ArrowUp' ? -1 : 1;
     for (let r = seat.row + dir; r >= 0 && r < layout.rows.length && !next; r += dir) {
