@@ -29,7 +29,7 @@ The ticket keeps a picture of your view.
 | **3 screens** | *Grand* (16 m curved screen, 286 seats), *Studio* (11 m, 180 seats), *Salon* (8.5 m, 72 recliners). Each has its own rake, row spacing, aisles and curved rows. |
 | **5 films** | Original animated scenes drawn live on the 3D screen. The room is lit by whatever's on screen. |
 | **A week of showtimes** | 12 a day. Seats sold depend on the film, the time of day and how good the seat is, so evening shows fill up and the sweet spots go first. |
-| **Built for phones** | The 3D view renders at 1.5× on phones and drops its resolution a notch if frames run slow, survives the browser taking the WebGL context away, and shows the film's poster while the 3D library (690 KB, once) downloads. |
+| **Built for phones** | The 3D view renders at up to 2× with 4× multisample antialiasing (cheap on phone GPUs), drops its resolution a notch if frames run slow (never below 1.25×), survives the browser taking the WebGL context away, and shows the film's poster while the 3D library (690 KB, once) downloads. |
 
 ## Run it
 

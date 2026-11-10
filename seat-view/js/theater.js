@@ -17,8 +17,6 @@ function deviceQuaternion(e) {
   q.multiply(new THREE.Quaternion().setFromAxisAngle(Z_AXIS, -screenAngle));
   return q;
 }
-const FILM_W = 1024;
-const FILM_H = 428;
 const reduceMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
@@ -93,8 +91,9 @@ function seatGeometry(style) {
     const foot = roundedBox(0.6, 0.34, 0.12, 0.05).translate(0, 0.22, -0.34);
     return merge([cushion, back, head, foot]);
   }
-  const cushion = roundedBox(0.5, 0.13, 0.48, 0.055).translate(0, 0.45, 0);
-  const back = roundedBox(0.54, 0.66, 0.17, 0.075).rotateX(0.16).translate(0, 0.71, 0.3);
+  // generous radii: tight bevels catch the screen light as hairline rims that alias
+  const cushion = roundedBox(0.5, 0.13, 0.48, 0.06).translate(0, 0.45, 0);
+  const back = roundedBox(0.54, 0.66, 0.17, 0.082).rotateX(0.16).translate(0, 0.71, 0.3);
   return merge([cushion, back]);
 }
 
@@ -160,12 +159,12 @@ function exitTexture() {
 export class Theater {
   constructor(container) {
     this.container = container;
-    // Phones get 1.5× at most (2× costs nearly twice the pixels for little gain), and
-    // antialiasing only where the pixel ratio is low enough that it shows.
-    const coarse = window.matchMedia?.('(pointer: coarse)').matches;
-    const dpr = Math.min(window.devicePixelRatio || 1, coarse ? 1.5 : 2);
-    this.quality = { pr: dpr, cap: dpr, slow: 0, since: performance.now() };
-    this.renderer = new THREE.WebGLRenderer({ antialias: dpr < 1.5, powerPreference: 'high-performance' });
+    // Up to 2× resolution with multisample antialiasing everywhere: phone GPUs do MSAA
+    // almost for free, and without it the lit edges of the seats turn into stair-steps.
+    // If frames keep running slow the resolution steps down, but never below 1.25×.
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.quality = { pr: dpr, floor: Math.min(dpr, 1.25), slow: 0, since: performance.now() };
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(dpr);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
@@ -178,15 +177,19 @@ export class Theater {
     this.camera = new THREE.PerspectiveCamera(60, 1, 0.05, 120);
     this.camera.rotation.order = 'YXZ';
 
+    // The film: sharper on big screens, and mipmapped so it doesn't shimmer from the back
+    const longest = Math.max(window.screen?.width || 0, window.screen?.height || 0, window.innerWidth) * dpr;
+    this.filmW = longest > 1800 ? 1600 : 1024;
+    this.filmH = Math.round(this.filmW / 2.39);
     this.film = document.createElement('canvas');
-    this.film.width = FILM_W;
-    this.film.height = FILM_H;
+    this.film.width = this.filmW;
+    this.film.height = this.filmH;
     this.filmCtx = this.film.getContext('2d');
     this.filmTex = new THREE.CanvasTexture(this.film);
     this.filmTex.colorSpace = THREE.SRGBColorSpace;
-    this.filmTex.generateMipmaps = false;
-    this.filmTex.minFilter = THREE.LinearFilter;
-    this.filmTex.anisotropy = 4;
+    this.filmTex.generateMipmaps = true;
+    this.filmTex.minFilter = THREE.LinearMipmapLinearFilter;
+    this.filmTex.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
     this.sampler = document.createElement('canvas');
     this.sampler.width = 3;
     this.sampler.height = 2;
@@ -237,14 +240,14 @@ export class Theater {
         roughness: 0.78,
         sheen: 1,
         sheenColor: new THREE.Color(0xff5a46),
-        sheenRoughness: 0.32,
+        sheenRoughness: 0.5,
       }),
       velvetPremium: new THREE.MeshPhysicalMaterial({
         color: 0x5c0d1c,
         roughness: 0.72,
         sheen: 1,
         sheenColor: new THREE.Color(0xff6a7a),
-        sheenRoughness: 0.3,
+        sheenRoughness: 0.5,
       }),
       leather: new THREE.MeshPhysicalMaterial({
         color: 0x5a1012,
@@ -808,7 +811,7 @@ export class Theater {
   drawFilm(t, force) {
     if (!force && t - this.lastFilm < 1 / 30) return;
     this.lastFilm = t;
-    drawScene(this.sceneName, this.filmCtx, FILM_W, FILM_H, t);
+    drawScene(this.sceneName, this.filmCtx, this.filmW, this.filmH, t);
     this.filmTex.needsUpdate = true;
     if (force || t - this.lastSample > 0.2) {
       this.lastSample = t;
@@ -889,10 +892,10 @@ export class Theater {
     const q = this.quality;
     const dt = nowMs - (this.lastFrameAt || nowMs);
     this.lastFrameAt = nowMs;
-    if (dt <= 0 || dt > 500 || nowMs - q.since < 2500 || q.pr <= 1) return; // settling, or tab was away
+    if (dt <= 0 || dt > 500 || nowMs - q.since < 2500 || q.pr <= q.floor) return; // settling, or tab was away
     q.slow = dt > 34 ? q.slow + 1 : Math.max(0, q.slow - 1);
     if (q.slow < 40) return;
-    q.pr = Math.max(1, q.pr - 0.25);
+    q.pr = Math.max(q.floor, q.pr - 0.25);
     q.slow = 0;
     q.since = nowMs;
     this.renderer.setPixelRatio(q.pr);
