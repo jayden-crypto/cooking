@@ -53,6 +53,7 @@ On [Vercel](https://vercel.com): **Add New → Project**, pick this repository, 
 | --- | --- |
 | `js/layout.js` | Turns a screen's spec (screen size, rows, blocks, rake, spacing) into seat positions and eye heights, then works out each seat's distance, field of view, offset, viewing angles, sightline clearance and a 0–100 score. The 3D room, the map and the numbers all come from here, so they always agree. |
 | `js/theater.js` | The 3D room (three.js): curved stepped floor, instanced seats with velvet shading, an audience (head, hair, shoulders) for sold seats, curtains, aisle lights. The camera sits at the seat's eye height with a fixed lens, so seats can be compared fairly. Also the tilt-to-look and the small per-seat views. |
+| `js/post.js` | The picture's finish: the room renders into a multisampled HDR target, then gets a soft bloom from the screen and lights, a vignette, fine moving film grain (which also hides colour banding in the dark) and filmic tone mapping. The film itself keeps its true colours. Falls back to 8-bit on GPUs without float targets, and drops the bloom first if frames run slow. |
 | `js/films.js` | The five films, drawn on a canvas each frame and used as the screen texture and the posters. |
 | `js/seatmap.js` | SVG seat map built from the layout, with tap, drag-to-scrub and heat-map colouring. |
 | `js/data.js` | The cinema, screens, films, showtimes, prices and seeded seat sales. |

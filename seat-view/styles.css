@@ -524,6 +524,18 @@ svg {
   background: #000;
 }
 
+.stage-loading {
+  transition: opacity 0.45s var(--ease-out);
+}
+
+.stage-loading.fading {
+  opacity: 0;
+}
+
+.stage-loading:not([hidden]) canvas {
+  view-transition-name: poster;
+}
+
 .stage-loading canvas {
   width: min(78vw, 420px);
   height: auto;
@@ -1831,5 +1843,39 @@ svg {
   .switch-ui,
   .switch-ui::after {
     transition: none;
+  }
+}
+
+/* ---------- moving between screens ---------- */
+
+/* the old screen gets out of the way quickly, the new one settles in */
+::view-transition-old(root) {
+  animation-duration: 0.18s;
+  animation-timing-function: ease-out;
+}
+
+::view-transition-new(root) {
+  animation-duration: 0.36s;
+  animation-delay: 0.04s;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* the tapped film's poster glides from its card into the room */
+::view-transition-group(poster) {
+  animation-duration: 0.55s;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+::view-transition-old(poster),
+::view-transition-new(poster) {
+  height: 100%;
+  object-fit: cover;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
   }
 }

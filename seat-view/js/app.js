@@ -204,6 +204,9 @@ views.home.addEventListener('click', (e) => {
   }
   const time = e.target.closest('[data-show]');
   if (time && !time.disabled) {
+    // this film's poster is the one that glides into the room
+    const still = time.closest('.film')?.querySelector('.film-still');
+    if (still) still.style.viewTransitionName = 'poster';
     go(routes.show(time.dataset.show));
     return;
   }
@@ -230,15 +233,9 @@ function getTheater() {
           store.setPref('hintSeen', true);
         }
       };
-      theater.onFirstFrame = () => {
-        $('#stage-loading').hidden = true;
-        maybeHint();
-      };
-      theater.onContextLost = () => {
-        $('#stage-loading').hidden = false;
-        $('#stage-loading p').lastChild.textContent = 'Restarting the 3D view';
-      };
-      theater.onContextRestored = () => ($('#stage-loading').hidden = true);
+      theater.onFirstFrame = () => maybeHint();
+      theater.onContextLost = () => showLoading(null, 'Restarting the 3D view');
+      theater.onContextRestored = () => theater.afterNextFrame(hideLoading);
       theater.setPeople(state.prefs.people);
       return theater;
     })
@@ -274,6 +271,27 @@ function syncRegion() {
 }
 
 let hintTimer;
+/* The film's poster stands in while the room loads or changes, then fades into the 3D. */
+let loadingFade;
+function showLoading(scene, text = 'Setting up the room') {
+  const el = $('#stage-loading');
+  clearTimeout(loadingFade);
+  if (scene) drawPoster(scene, $('#stage-loading canvas'));
+  $('#stage-loading p').lastChild.textContent = text;
+  el.classList.remove('fading');
+  el.hidden = false;
+}
+function hideLoading() {
+  const el = $('#stage-loading');
+  if (el.hidden) return;
+  el.classList.add('fading');
+  clearTimeout(loadingFade);
+  loadingFade = setTimeout(() => {
+    el.hidden = true;
+    el.classList.remove('fading');
+  }, 450);
+}
+
 function maybeHint() {
   if (!state.prefs.hintSeen && !views.seats.hidden) showHint();
 }
@@ -460,10 +478,9 @@ async function openShow(showId, focusId) {
 
   // while the 3D room loads, the film's poster stands in for it
   drawPoster(show.film.scene, $('#stage-fallback canvas'));
-  if (!theater?.firstFrameDone) {
-    drawPoster(show.film.scene, $('#stage-loading canvas'));
-    $('#stage-loading').hidden = false;
-  }
+  // Cover the canvas while it still holds another room's last frame (or nothing yet).
+  const stale = !theater?.firstFrameDone || theater.layout !== layout || theater.sceneName !== show.film.scene;
+  if (stale) showLoading(show.film.scene);
   const t = await getTheater();
   if (!t || views.seats.hidden || state.show !== show) return;
   // the fly-in from the back is an introduction: once per room is enough
@@ -476,6 +493,7 @@ async function openShow(showId, focusId) {
   t.setShow({ layout, scene: show.film.scene, taken: audienceFor() });
   t.focusSeat(layout.byId.get(state.focus), { instant: roomChanged && !firstVisit });
   t.start();
+  if (stale) t.afterNextFrame(hideLoading);
   if (t.firstFrameDone) maybeHint();
 }
 
@@ -1068,7 +1086,22 @@ function renderTicket(id) {
 
 /* ---------- routing ---------- */
 
+// Screen changes cross-fade (and the poster glides) where the browser supports view
+// transitions; elsewhere they simply switch.
+let booted = false;
 function route() {
+  const motion = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (booted && motion && document.startViewTransition) {
+    document.startViewTransition(() => {
+      applyRoute();
+    });
+  } else {
+    applyRoute();
+  }
+  booted = true;
+}
+
+function applyRoute() {
   const r = parseRoute(location.hash);
   if (r.page === 'show') {
     openShow(r.id, r.seat);
