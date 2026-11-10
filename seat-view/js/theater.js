@@ -3,6 +3,7 @@
 
 import * as THREE from '../vendor/three.module.min.js';
 import { drawScene } from './films.js';
+import { Post } from './post.js';
 
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
@@ -17,8 +18,6 @@ function deviceQuaternion(e) {
   q.multiply(new THREE.Quaternion().setFromAxisAngle(Z_AXIS, -screenAngle));
   return q;
 }
-const FILM_W = 1024;
-const FILM_H = 428;
 const reduceMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
@@ -53,7 +52,40 @@ function roundedBox(w, h, d, r, seg = 4) {
     }
     pos.setXYZ(k, p.x, p.y, p.z);
   }
-  geo.deleteAttribute('uv');
+  return geo;
+}
+
+/** Bend a part so its back bulges out by `bulge` in the middle (a curved shell, not a
+ *  flat board), keeping the normals right so the light rolls smoothly across it. */
+function bend(geo, halfW, bulge) {
+  const p = geo.attributes.position;
+  const n = geo.attributes.normal;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i) / halfW;
+    p.setZ(i, p.getZ(i) + bulge * (1 - x * x));
+    const slope = (-2 * bulge * x) / halfW; // dz/dx
+    const nx = n.getX(i) - slope * n.getZ(i);
+    const len = Math.hypot(nx, n.getY(i), n.getZ(i)) || 1;
+    n.setXYZ(i, nx / len, n.getY(i) / len, n.getZ(i) / len);
+  }
+  return geo;
+}
+
+const smooth = (a, b, v) => {
+  const t = Math.min(1, Math.max(0, (v - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+
+/** Bake soft ambient occlusion into vertex colours: creases and undersides go darker. */
+function shade(geo, fn) {
+  const p = geo.attributes.position;
+  const n = geo.attributes.normal;
+  const c = new Float32Array(p.count * 3);
+  for (let i = 0; i < p.count; i++) {
+    const v = fn(p.getX(i), p.getY(i), p.getZ(i), n.getY(i), n.getZ(i));
+    c[i * 3] = c[i * 3 + 1] = c[i * 3 + 2] = v;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(c, 3));
   return geo;
 }
 
@@ -66,12 +98,18 @@ function merge(geos) {
   }
   const pos = new Float32Array(vCount * 3);
   const nor = new Float32Array(vCount * 3);
+  const withUv = geos.every((g) => g.attributes.uv);
+  const withColor = geos.every((g) => g.attributes.color);
+  const uv = withUv ? new Float32Array(vCount * 2) : null;
+  const col = withColor ? new Float32Array(vCount * 3) : null;
   const idx = new Uint32Array(iCount);
   let vo = 0;
   let io = 0;
   for (const g of geos) {
     pos.set(g.attributes.position.array, vo * 3);
     nor.set(g.attributes.normal.array, vo * 3);
+    if (uv) uv.set(g.attributes.uv.array, vo * 2);
+    if (col) col.set(g.attributes.color.array, vo * 3);
     const count = g.attributes.position.count;
     if (g.index) for (let i = 0; i < g.index.count; i++) idx[io++] = g.index.getX(i) + vo;
     else for (let i = 0; i < count; i++) idx[io++] = i + vo;
@@ -81,32 +119,100 @@ function merge(geos) {
   const out = new THREE.BufferGeometry();
   out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  if (uv) out.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  if (col) out.setAttribute('color', new THREE.BufferAttribute(col, 3));
   out.setIndex(new THREE.BufferAttribute(idx, 1));
   return out;
 }
 
 function seatGeometry(style) {
   if (style === 'recliner') {
-    const cushion = roundedBox(0.66, 0.2, 0.62, 0.08).translate(0, 0.44, -0.02);
-    const back = roundedBox(0.7, 0.66, 0.28, 0.12).rotateX(0.22).translate(0, 0.76, 0.36);
-    const head = roundedBox(0.5, 0.2, 0.16, 0.08).rotateX(0.22).translate(0, 1.0, 0.44);
-    const foot = roundedBox(0.6, 0.34, 0.12, 0.05).translate(0, 0.22, -0.34);
+    const cushion = shade(roundedBox(0.66, 0.2, 0.62, 0.09).translate(0, 0.44, -0.02), (x, y, z, ny) =>
+      ny < -0.5 ? 0.35 : 1 - 0.38 * smooth(0.1, 0.3, z),
+    );
+    const back = shade(bend(roundedBox(0.7, 0.66, 0.28, 0.13), 0.35, 0.05).rotateX(0.22).translate(0, 0.76, 0.36), (x, y) =>
+      0.5 + 0.5 * smooth(0.5, 0.95, y),
+    );
+    const head = shade(bend(roundedBox(0.5, 0.2, 0.16, 0.08), 0.25, 0.03).rotateX(0.22).translate(0, 1.0, 0.44), () => 1);
+    const foot = shade(roundedBox(0.6, 0.34, 0.12, 0.05).translate(0, 0.22, -0.34), (x, y) => 0.45 + 0.4 * smooth(0.05, 0.4, y));
     return merge([cushion, back, head, foot]);
   }
-  const cushion = roundedBox(0.5, 0.13, 0.48, 0.055).translate(0, 0.45, 0);
-  const back = roundedBox(0.54, 0.66, 0.17, 0.075).rotateX(0.16).translate(0, 0.71, 0.3);
+  // generous radii: tight bevels catch the screen light as hairline rims that alias
+  const cushion = shade(roundedBox(0.5, 0.13, 0.48, 0.06).translate(0, 0.45, 0), (x, y, z, ny) =>
+    // darker underneath, and where the cushion tucks in under the back
+    ny < -0.5 ? 0.35 : 1 - 0.4 * smooth(0.06, 0.24, z),
+  );
+  const back = shade(bend(roundedBox(0.54, 0.66, 0.17, 0.082), 0.27, 0.04).rotateX(0.16).translate(0, 0.71, 0.3), (x, y) =>
+    // the lower back sits in the shadow of the row behind and the cushion
+    0.48 + 0.52 * smooth(0.42, 0.92, y),
+  );
   return merge([cushion, back]);
 }
 
 function armGeometry(style) {
+  const fade = (x, y) => 0.4 + 0.6 * smooth(0.02, 0.6, y);
   if (style === 'recliner') {
-    const rest = roundedBox(0.16, 0.12, 0.72, 0.05).translate(0, 0.6, 0.02);
-    const body = roundedBox(0.13, 0.5, 0.66, 0.04).translate(0, 0.3, 0.04);
+    const rest = shade(roundedBox(0.16, 0.12, 0.72, 0.05).translate(0, 0.6, 0.02), fade);
+    const body = shade(roundedBox(0.13, 0.5, 0.66, 0.04).translate(0, 0.3, 0.04), fade);
     return merge([rest, body]);
   }
-  const rest = roundedBox(0.075, 0.055, 0.5, 0.025).translate(0, 0.66, 0.02);
-  const post = roundedBox(0.055, 0.64, 0.4, 0.02).translate(0, 0.32, 0.06);
+  const rest = shade(roundedBox(0.075, 0.055, 0.5, 0.025).translate(0, 0.66, 0.02), fade);
+  const post = shade(roundedBox(0.055, 0.64, 0.4, 0.02).translate(0, 0.32, 0.06), fade);
   return merge([rest, post]);
+}
+
+/** Tileable fabric normal map: a fine pile with a faint weave, so close-up seats and
+ *  curtains read as cloth instead of plastic. Mipmaps flatten it out at a distance. */
+function fabricNormalTexture() {
+  const N = 256;
+  const rand = mulberry('fabric');
+  const G = 64;
+  const grid = Float32Array.from({ length: G * G }, rand);
+  const at = (i, j) => grid[((j % G) + G) % G * G + (((i % G) + G) % G)];
+  const noise = (u, v) => {
+    const x = u * G;
+    const y = v * G;
+    const i = Math.floor(x);
+    const j = Math.floor(y);
+    const fx = x - i;
+    const fy = y - j;
+    const sx = fx * fx * (3 - 2 * fx);
+    const sy = fy * fy * (3 - 2 * fy);
+    const a = at(i, j) + (at(i + 1, j) - at(i, j)) * sx;
+    const b = at(i, j + 1) + (at(i + 1, j + 1) - at(i, j + 1)) * sx;
+    return a + (b - a) * sy;
+  };
+  const h = new Float32Array(N * N);
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const u = x / N;
+      const v = y / N;
+      const weave = Math.sin(u * Math.PI * 2 * 48) * Math.sin(v * Math.PI * 2 * 48) * 0.18;
+      h[y * N + x] = noise(u, v) * 0.7 + noise(u * 3, v * 3) * 0.3 + weave;
+    }
+  }
+  const c = document.createElement('canvas');
+  c.width = c.height = N;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(N, N);
+  const H = (x, y) => h[((y + N) % N) * N + ((x + N) % N)];
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const dx = (H(x + 1, y) - H(x - 1, y)) * 2.2;
+      const dy = (H(x, y + 1) - H(x, y - 1)) * 2.2;
+      const len = Math.hypot(dx, dy, 1);
+      const k = (y * N + x) * 4;
+      img.data[k] = ((-dx / len) * 0.5 + 0.5) * 255;
+      img.data[k + 1] = ((-dy / len) * 0.5 + 0.5) * 255;
+      img.data[k + 2] = (1 / len) * 255;
+      img.data[k + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = 4;
+  return tex;
 }
 
 function glowTexture() {
@@ -160,13 +266,17 @@ function exitTexture() {
 export class Theater {
   constructor(container) {
     this.container = container;
-    // Phones get 1.5× at most (2× costs nearly twice the pixels for little gain), and
-    // antialiasing only where the pixel ratio is low enough that it shows.
-    const coarse = window.matchMedia?.('(pointer: coarse)').matches;
-    const dpr = Math.min(window.devicePixelRatio || 1, coarse ? 1.5 : 2);
-    this.quality = { pr: dpr, cap: dpr, slow: 0, since: performance.now() };
-    this.renderer = new THREE.WebGLRenderer({ antialias: dpr < 1.5, powerPreference: 'high-performance' });
+    // Up to 2× resolution with multisample antialiasing everywhere: phone GPUs do MSAA
+    // almost for free, and without it the lit edges of the seats turn into stair-steps.
+    // If frames keep running slow the resolution steps down, but never below 1.25×.
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.quality = { pr: dpr, floor: Math.min(dpr, 1.25), slow: 0, since: performance.now() };
+    // The picture goes through the post pipeline, which multisamples its own target, so
+    // the canvas itself needs no antialiasing buffers (that saves a lot of phone memory).
+    this.quality.bloom = true;
+    this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(dpr);
+    this.post = new Post(this.renderer);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     this.canvas = this.renderer.domElement;
@@ -175,18 +285,24 @@ export class Theater {
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x030202);
+    // a faint haze: the far end of the room softens into the dark like a real auditorium
+    this.scene.fog = new THREE.FogExp2(0x050304, 0.02);
     this.camera = new THREE.PerspectiveCamera(60, 1, 0.05, 120);
     this.camera.rotation.order = 'YXZ';
 
+    // The film: sharper on big screens, and mipmapped so it doesn't shimmer from the back
+    const longest = Math.max(window.screen?.width || 0, window.screen?.height || 0, window.innerWidth) * dpr;
+    this.filmW = longest > 1800 ? 1600 : 1024;
+    this.filmH = Math.round(this.filmW / 2.39);
     this.film = document.createElement('canvas');
-    this.film.width = FILM_W;
-    this.film.height = FILM_H;
+    this.film.width = this.filmW;
+    this.film.height = this.filmH;
     this.filmCtx = this.film.getContext('2d');
     this.filmTex = new THREE.CanvasTexture(this.film);
     this.filmTex.colorSpace = THREE.SRGBColorSpace;
-    this.filmTex.generateMipmaps = false;
-    this.filmTex.minFilter = THREE.LinearFilter;
-    this.filmTex.anisotropy = 4;
+    this.filmTex.generateMipmaps = true;
+    this.filmTex.minFilter = THREE.LinearMipmapLinearFilter;
+    this.filmTex.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
     this.sampler = document.createElement('canvas');
     this.sampler.width = 3;
     this.sampler.height = 2;
@@ -231,20 +347,35 @@ export class Theater {
   }
 
   makeMaterials() {
+    const fabric = fabricNormalTexture();
+    const cloth = (repeatX, repeatY) => {
+      const t = fabric.clone();
+      t.repeat.set(repeatX, repeatY);
+      t.needsUpdate = true;
+      return t;
+    };
+    // values above 1 are brighter than white: in the HDR pipeline they feed the glow
+    const hdr = (hex, k) => new THREE.Color(hex).multiplyScalar(k);
     this.mat = {
       velvet: new THREE.MeshPhysicalMaterial({
         color: 0x8c1216,
-        roughness: 0.78,
+        roughness: 0.8,
         sheen: 1,
         sheenColor: new THREE.Color(0xff5a46),
-        sheenRoughness: 0.32,
+        sheenRoughness: 0.5,
+        vertexColors: true,
+        normalMap: cloth(3, 3),
+        normalScale: new THREE.Vector2(0.35, 0.35),
       }),
       velvetPremium: new THREE.MeshPhysicalMaterial({
         color: 0x5c0d1c,
-        roughness: 0.72,
+        roughness: 0.74,
         sheen: 1,
         sheenColor: new THREE.Color(0xff6a7a),
-        sheenRoughness: 0.3,
+        sheenRoughness: 0.5,
+        vertexColors: true,
+        normalMap: cloth(3, 3),
+        normalScale: new THREE.Vector2(0.35, 0.35),
       }),
       leather: new THREE.MeshPhysicalMaterial({
         color: 0x5a1012,
@@ -253,12 +384,20 @@ export class Theater {
         clearcoatRoughness: 0.4,
         sheen: 0.4,
         sheenColor: new THREE.Color(0xff7060),
+        vertexColors: true,
+        normalMap: cloth(1.5, 1.5),
+        normalScale: new THREE.Vector2(0.12, 0.12),
       }),
-      arm: new THREE.MeshStandardMaterial({ color: 0x17110f, roughness: 0.55, metalness: 0.1 }),
+      arm: new THREE.MeshStandardMaterial({ color: 0x17110f, roughness: 0.55, metalness: 0.1, vertexColors: true }),
       carpet: new THREE.MeshStandardMaterial({ color: 0x1a1010, roughness: 1 }),
       riser: new THREE.MeshStandardMaterial({ color: 0x0c0808, roughness: 1, side: THREE.DoubleSide }),
       wall: new THREE.MeshStandardMaterial({ color: 0x15111a, roughness: 0.95 }),
-      panel: new THREE.MeshStandardMaterial({ color: 0x221b26, roughness: 0.9 }),
+      panel: new THREE.MeshStandardMaterial({
+        color: 0x221b26,
+        roughness: 0.92,
+        normalMap: cloth(2, 6),
+        normalScale: new THREE.Vector2(0.5, 0.5),
+      }),
       ceiling: new THREE.MeshStandardMaterial({ color: 0x060507, roughness: 1 }),
       mask: new THREE.MeshStandardMaterial({ color: 0x030303, roughness: 1 }),
       curtain: new THREE.MeshPhysicalMaterial({
@@ -268,16 +407,20 @@ export class Theater {
         sheenColor: new THREE.Color(0xff4a3a),
         sheenRoughness: 0.6,
         side: THREE.DoubleSide,
+        normalMap: cloth(10, 14),
+        normalScale: new THREE.Vector2(0.4, 0.4),
       }),
-      screen: new THREE.MeshBasicMaterial({ map: this.filmTex, toneMapped: false }),
+      // The picture: drawn brighter than white so it feeds the glow, and with alpha 0 so
+      // the final pass knows to show it in its own colours (see post.js).
+      screen: new THREE.MeshBasicMaterial({ map: this.filmTex, color: hdr(0xffffff, this.post.screenBoost), opacity: 0, fog: false }),
       head: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6 }),
       hair: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85 }),
       body: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 }),
       spaceMark: new THREE.MeshBasicMaterial({ color: 0x5a5f6a, transparent: true, opacity: 0.55, depthWrite: false }),
-      stepLight: new THREE.MeshBasicMaterial({ color: 0xffb066, toneMapped: false }),
-      sconce: new THREE.MeshBasicMaterial({ color: 0xffc58a, toneMapped: false }),
-      booth: new THREE.MeshBasicMaterial({ color: 0xfff1dc, toneMapped: false }),
-      exit: new THREE.MeshBasicMaterial({ map: exitTexture(), toneMapped: false }),
+      stepLight: new THREE.MeshBasicMaterial({ color: hdr(0xffb066, 3.2) }),
+      sconce: new THREE.MeshBasicMaterial({ color: hdr(0xffc58a, 2.4) }),
+      booth: new THREE.MeshBasicMaterial({ color: hdr(0xfff1dc, 3), fog: false }),
+      exit: new THREE.MeshBasicMaterial({ map: exitTexture(), color: hdr(0xffffff, 1.8) }),
       glow: new THREE.SpriteMaterial({
         map: glowTexture(),
         color: 0xffb070,
@@ -292,7 +435,7 @@ export class Theater {
         depthWrite: false,
         transparent: true,
         opacity: 0.35,
-        toneMapped: false,
+        fog: false,
       }),
     };
   }
@@ -595,7 +738,7 @@ export class Theater {
       this.heads.setMatrixAt(n, mtx);
       this.heads.setColorAt(n, color.setHex(skin[Math.floor(rand() * skin.length)]));
       // some hair is fuller than others; a few people have very little
-      const volume = rand() < 0.08 ? 0.3 : 0.95 + rand() * 0.25;
+      const volume = rand() < 0.04 ? 0.3 : 0.95 + rand() * 0.25;
       mtx.compose(at, quat, new THREE.Vector3(scale * (0.95 + volume * 0.08), scale * volume, scale * (0.95 + volume * 0.1)));
       this.hairs.setMatrixAt(n, mtx);
       this.hairs.setColorAt(n, color.setHex(hair[Math.floor(rand() * hair.length)]));
@@ -808,7 +951,7 @@ export class Theater {
   drawFilm(t, force) {
     if (!force && t - this.lastFilm < 1 / 30) return;
     this.lastFilm = t;
-    drawScene(this.sceneName, this.filmCtx, FILM_W, FILM_H, t);
+    drawScene(this.sceneName, this.filmCtx, this.filmW, this.filmH, t);
     this.filmTex.needsUpdate = true;
     if (force || t - this.lastSample > 0.2) {
       this.lastSample = t;
@@ -883,18 +1026,23 @@ export class Theater {
     }
   }
 
-  /** Drop the pixel ratio a notch when frames keep running slow (and never raise it
-   *  again: a steady picture beats one that flickers between qualities). */
+  /** When frames keep running slow, give up the glow first, then resolution a notch at
+   *  a time (never raising it again: a steady picture beats one that flickers). */
   adapt(nowMs) {
     const q = this.quality;
     const dt = nowMs - (this.lastFrameAt || nowMs);
     this.lastFrameAt = nowMs;
-    if (dt <= 0 || dt > 500 || nowMs - q.since < 2500 || q.pr <= 1) return; // settling, or tab was away
+    if (dt <= 0 || dt > 500 || nowMs - q.since < 2500) return; // settling, or tab was away
+    if (!q.bloom && q.pr <= q.floor) return;
     q.slow = dt > 34 ? q.slow + 1 : Math.max(0, q.slow - 1);
     if (q.slow < 40) return;
-    q.pr = Math.max(1, q.pr - 0.25);
     q.slow = 0;
     q.since = nowMs;
+    if (q.bloom) {
+      q.bloom = false;
+      return;
+    }
+    q.pr = Math.max(q.floor, q.pr - 0.25);
     this.renderer.setPixelRatio(q.pr);
     this.renderer.setSize(this.size.w, this.size.h, false);
   }
@@ -906,7 +1054,29 @@ export class Theater {
     this.updateLights();
     this.renderViews();
     this.updateCamera(nowMs);
-    this.renderer.render(this.scene, this.camera);
+    this.draw(nowMs);
+    if (this.nextFrameCallbacks?.length) {
+      const cbs = this.nextFrameCallbacks;
+      this.nextFrameCallbacks = [];
+      cbs.forEach((cb) => cb());
+    }
+  }
+
+  /** Run `cb` after the next frame of the room has been drawn. */
+  afterNextFrame(cb) {
+    (this.nextFrameCallbacks ||= []).push(cb);
+  }
+
+  /** The main picture, through the post pipeline (glow, grain, vignette, tone mapping). */
+  draw(nowMs = performance.now()) {
+    const { w, h } = this.size;
+    const r = this.region || { x: 0, y: 0, w, h };
+    this.post.render(this.scene, this.camera, {
+      bloom: this.quality.bloom,
+      // centre the vignette on the part of the view not covered by the sheet
+      centre: { x: (r.x + r.w / 2) / w, y: 1 - (r.y + r.h * 0.45) / h },
+      time: nowMs / 1000,
+    });
   }
 
   /* ---------- small views from other seats ---------- */
@@ -933,7 +1103,6 @@ export class Theater {
     const near = cam.near;
     const start = performance.now();
     const target = new THREE.Vector3();
-    r.setScissorTest(true);
     let drawn = 0;
     while (this.viewQueue.length && (drawn === 0 || performance.now() - start < budgetMs)) {
       const job = this.viewQueue.shift();
@@ -954,8 +1123,6 @@ export class Theater {
       const py = h * 0.42;
       cam.projectionMatrix.makePerspective((-px / f) * near, ((w - px) / f) * near, (py / f) * near, (-(h - py) / f) * near, near, cam.far);
       cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
-      r.setViewport(0, 0, w, h);
-      r.setScissor(0, 0, w, h);
       // for a sold seat, take its owner out of the picture while we sit there
       const hide = job.hide && this.people ? this.headIndex?.get(job.seat.id) : undefined;
       const saved = [];
@@ -968,7 +1135,7 @@ export class Theater {
           mesh.instanceMatrix.needsUpdate = true;
         }
       }
-      r.render(this.scene, cam);
+      this.post.render(this.scene, cam, { view: { x: 0, y: 0, w, h }, target: 'thumb', bloom: false, time: start / 1000 });
       if (hide !== undefined) {
         this.audience.forEach((mesh, k) => {
           mesh.setMatrixAt(hide, saved[k]);
@@ -979,8 +1146,6 @@ export class Theater {
       job.done?.();
       drawn++;
     }
-    r.setScissorTest(false);
-    r.setViewport(0, 0, this.size.w, this.size.h);
   }
 
   /** JPEG of the view from the current seat, looking straight at the screen. */
@@ -991,7 +1156,7 @@ export class Theater {
     this.flight = null;
     this.look.yaw = this.look.pitch = 0;
     this.updateCamera(performance.now());
-    this.renderer.render(this.scene, this.camera);
+    this.draw();
     const r = this.region || { x: 0, y: 0, w: this.size.w, h: this.size.h };
     const ratio = this.canvas.width / this.size.w;
     // landscape crop with the screen in the upper part and the rows in front below it
@@ -1004,8 +1169,8 @@ export class Theater {
     out.getContext('2d').drawImage(this.canvas, r.x * ratio, top * ratio, r.w * ratio, cropH * ratio, 0, 0, out.width, out.height);
     Object.assign(this.look, saved);
     this.updateCamera(performance.now());
-    this.renderer.render(this.scene, this.camera);
-    return out.toDataURL('image/jpeg', 0.82);
+    this.draw();
+    return out.toDataURL('image/jpeg', 0.86);
   }
 }
 
