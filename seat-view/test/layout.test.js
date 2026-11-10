@@ -245,3 +245,36 @@ test('the home page skips days where every showing has started', async () => {
   const morning = new Date(2026, 10, 12, 9, 0);
   assert.equal(firstBookableDay(upcomingDays(6, morning), morning), days[0].key);
 });
+
+test('zooming keeps the point under your fingers where it is, and never leaves the map', async () => {
+  const { zoomView, toMap, clampView, fitScale } = await import('../js/seatmap.js');
+  const base = { x: -10, y: -1.3, w: 20, h: 12 };
+  const rect = { left: 16, top: 400, width: 358, height: 214.8 }; // same shape as the map
+  const close = (a, b) => Math.abs(a - b) < 1e-6;
+
+  // zoom 1 is the whole map
+  const full = zoomView(base, rect, 1, { x: 0, y: 0 }, 100, 500);
+  assert.deepEqual(full, base);
+
+  // pinch at a point in the middle: that map point stays under the same screen point
+  const cx = 200;
+  const cy = 520;
+  const pt = toMap(rect, base, cx, cy);
+  for (const z of [1.5, 2, 3.7]) {
+    const v = zoomView(base, rect, z, pt, cx, cy);
+    const back = toMap(rect, v, cx, cy);
+    assert.ok(close(back.x, pt.x) && close(back.y, pt.y), `zoom ${z} drifted`);
+    assert.ok(close(v.w, base.w / z) && close(v.h, base.h / z));
+    assert.ok(close(fitScale(rect, v), fitScale(rect, base) * z));
+  }
+
+  // pinching in a corner can't pan past the edge of the map
+  const corner = toMap(rect, base, rect.left + 2, rect.top + 2);
+  const v = zoomView(base, rect, 3, corner, rect.left + 200, rect.top + 150);
+  assert.ok(v.x >= base.x && v.y >= base.y);
+  assert.ok(v.x + v.w <= base.x + base.w + 1e-9 && v.y + v.h <= base.y + base.h + 1e-9);
+
+  // a view can't be bigger than the map, or sit outside it
+  assert.deepEqual(clampView(base, { x: -50, y: 40, w: 99, h: 99 }), base);
+  assert.deepEqual(clampView(base, { x: 5, y: 9, w: 10, h: 6 }), { x: 0, y: 4.7, w: 10, h: 6 });
+});

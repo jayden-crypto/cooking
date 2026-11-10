@@ -87,15 +87,24 @@
           <div class="map-block" id="map-block">
             <div class="map-head">
               <h3>Pick a seat</h3>
+              <div class="map-zoom" role="group" aria-label="Zoom the seat map">
+                <button class="zoom-btn" id="zoom-out" aria-label="Zoom out" disabled>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12" /></svg>
+                </button>
+                <button class="zoom-btn" id="zoom-in" aria-label="Zoom in">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v12M6 12h12" /></svg>
+                </button>
+              </div>
               <button class="chip-btn" id="best-btn">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.4 6.7 19.4l1.2-6L3.4 9.3l6-.7z" /></svg>
                 <span id="best-btn-label">Best available</span>
               </button>
             </div>
-            <div class="seat-map" id="seat-map" tabindex="0" role="application" aria-label="Seat map. Arrow keys move between free seats.">
+            <div class="seat-map" id="seat-map" tabindex="0" role="application" aria-label="Seat map. Arrow keys move between free seats, plus and minus zoom.">
               <svg id="map-svg"></svg>
+              <div class="map-pins" id="map-pins" aria-hidden="true"></div>
             </div>
-            <p class="map-hint">Tap a seat to look from it, or drag across the map and the view follows. Your seats stay together around it.</p>
+            <p class="map-hint">Tap a seat to look from it, or drag across the map and the view follows. Pinch or double-tap to zoom.</p>
             <div class="legend">
               <span><i class="lg free"></i>Free</span>
               <span id="lg-premium"><i class="lg premium"></i>Premium</span>
